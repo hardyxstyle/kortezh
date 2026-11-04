@@ -6,7 +6,15 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createDb, runSql, isOrdered } from '../content/engine.mjs';
 import { DATABASES } from '../content/databases.mjs';
-import { LESSONS } from '../content/lessons.mjs';
+import { LESSONS as BASE_LESSONS } from '../content/lessons.mjs';
+import { EXTRA, EXTRA_LESSONS } from '../content/extra.mjs';
+
+// Подреждане: тестови въпроси → основни → бонус
+const LESSONS = [...BASE_LESSONS, ...EXTRA_LESSONS].map((L) => {
+  const all = [...L.tasks, ...(EXTRA[L.id] || [])];
+  const rank = (t) => (t.kind === 'choice' ? 0 : t.bonus ? 2 : 1);
+  return { ...L, tasks: all.map((t, i) => [t, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([t]) => t) };
+});
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);

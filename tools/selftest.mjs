@@ -36,6 +36,13 @@ const cases = [
  ['s9-4', 'SELECT u.Име, u.Фамилия, u.Клас FROM Ученик u JOIN Оценки o ON o.[ID Ученик]=u.ID WHERE o.Оценка=6', false],
  ['s1-1', 'DROP TABLE Ученик; SELECT 1', false],
  ['s1-1', "SELECT * FROM Ученик; SELECT * FROM Учител", false],
+ ['s7-16', 'SELECT Филм.Заглавие, COUNT(*) FROM Филм LEFT JOIN Прожекция ON Прожекция.[ID Филм] = Филм.ID GROUP BY Филм.ID', false],
+ ['s7-16', 'SELECT f.Заглавие, (SELECT COUNT(*) FROM Прожекция p WHERE p.[ID Филм] = f.ID) FROM Филм f', true],
+ ['s8-19', 'SELECT Име, Фамилия FROM Режисьор WHERE ID IN (SELECT [ID Режисьор] FROM Филм) AND ID NOT IN (SELECT [ID Режисьор] FROM Филм WHERE Рейтинг < 7)', false],
+ ['s8-14', 'SELECT f.Заглавие FROM Филм f LEFT JOIN Прожекция p ON p.[ID Филм]=f.ID WHERE p.ID IS NULL', true],
+ ['s2-20', 'SELECT Заглавие, Минути, Минути / 60 FROM Филм', false],
+ ['s9-9', "SELECT Заглавие, Рейтинг FROM Филм WHERE Рейтинг IS NOT NULL ORDER BY Рейтинг DESC LIMIT 5", true],
+ ['k-b6', "UPDATE Билет SET Цена = 5 WHERE [ID Прожекция] = 24 AND Вид = 'ученически'", true],
 ];
 let bad=0;
 for (const [id, sql, want] of cases) {
