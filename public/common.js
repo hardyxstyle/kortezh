@@ -19,9 +19,9 @@ export async function api(path, body) {
   return data;
 }
 
-export function toast(text, ms = 2600) {
+export function toast(text, ms = 2600, cls = '') {
   const t = document.createElement('div');
-  t.className = 'toast';
+  t.className = 'toast ' + cls;
   t.setAttribute('role', 'status');
   t.textContent = text;
   document.body.appendChild(t);
@@ -144,3 +144,58 @@ export function schemaHtml(dbName) {
 }
 
 export const brand = `<span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></span>Кортеж`;
+
+// ---------- тема (светла / тъмна) ----------
+export function initTheme(btn) {
+  const apply = (t) => {
+    if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  };
+  apply(store.get('theme'));
+  if (!btn) return;
+  const isDark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+  const label = () => { btn.textContent = isDark() ? '☀ Светла' : '☾ Тъмна'; btn.setAttribute('aria-label', isDark() ? 'Светла тема' : 'Тъмна тема'); };
+  label();
+  btn.addEventListener('click', () => { const t = isDark() ? 'light' : 'dark'; store.set('theme', t); apply(t); label(); });
+}
+
+// ---------- цвят на всеки урок ----------
+const COLORS = { s1: '#2F6FEB', s2: '#0E9F6E', f1: '#D97706', s3: '#7C3AED', s4: '#DB2777', s5: '#0891B2', s6: '#65A30D', d1: '#C2410C', s7: '#4F46E5', o1: '#0D9488', s8: '#B45309', v1: '#9333EA', s9: '#E11D48', s10: '#475569' };
+export const lessonColor = (id) => COLORS[id] || '#2F6FEB';
+
+// ---------- значки ----------
+// prog: { taskId: {s, t, h} }, lessons: KORTEZH.lessons
+export function computeBadges(prog, lessons) {
+  const all = [];
+  lessons.forEach((L) => L.tasks.forEach((t) => all.push({ t, L })));
+  const solved = all.filter(({ t }) => prog[t.id]?.s);
+  const n = solved.length;
+  const firstTry = solved.filter(({ t }) => prog[t.id].t === 1 && !prog[t.id].h).length;
+  const noHint = solved.filter(({ t }) => !prog[t.id].h && t.kind === 'sql').length;
+  const bonus = solved.filter(({ t }) => t.bonus).length;
+  const read = lessons.filter((L) => prog['read:' + L.id]).length;
+  const out = [
+    { id: 'first', mark: '1', color: '#2F6FEB', name: 'Първи кортеж', desc: 'Първата решена задача', got: n >= 1 },
+    { id: 'ten', mark: '10', color: '#0E9F6E', name: 'Десетица', desc: '10 решени задачи', got: n >= 10 },
+    { id: 'fifty', mark: '50', color: '#7C3AED', name: 'Половин стотица', desc: '50 решени задачи', got: n >= 50 },
+    { id: 'hundred', mark: '100', color: '#E11D48', name: 'Стотица', desc: '100 решени задачи', got: n >= 100 },
+    { id: 'firsttry', mark: '1×', color: '#0891B2', name: 'От първия път', desc: '15 задачи, решени от първия опит без подсказка', got: firstTry >= 15 },
+    { id: 'nohint', mark: '∅', color: '#475569', name: 'Сам(а) си', desc: '30 SQL задачи без нито една подсказка', got: noHint >= 30 },
+    { id: 'bonus', mark: '★', color: '#B08D00', name: 'Ловец на бонуси', desc: '10 бонус задачи', got: bonus >= 10 },
+    { id: 'reader', mark: 'Т', color: '#65A30D', name: 'Теоретик', desc: 'Прочетена теория на 6 урока', got: read >= 6 },
+  ];
+  const perfect = lessons.filter((L) => L.tasks.length && L.tasks.every((t) => prog[t.id]?.s)).length;
+  out.push({ id: 'perfect', mark: '∑', color: '#C2410C', name: 'Перфекционист', desc: 'Урок с всички задачи, включително бонусите', got: perfect >= 1 });
+  lessons.forEach((L) => {
+    const main = L.tasks.filter((t) => !t.bonus);
+    if (!main.length) return;
+    const isControl = L.id === 's10';
+    let got;
+    if (isControl) {
+      const a = main.filter((t) => t.id.startsWith('k-a')), b = main.filter((t) => t.id.startsWith('k-b'));
+      got = (a.length && a.every((t) => prog[t.id]?.s)) || (b.length && b.every((t) => prog[t.id]?.s));
+    } else got = main.every((t) => prog[t.id]?.s);
+    out.push({ id: 'L' + L.id, mark: String(L.num), color: lessonColor(L.id), name: isControl ? 'Контролното е минато' : L.title, desc: isControl ? 'Решен цял вариант на контролната' : `Всички основни задачи от урок ${L.num}`, got: !!got, lesson: L.id });
+  });
+  return out;
+}
+export const medal = (b, size = '') => `<span class="medal ${size}" style="--accent:${b.color}">${esc(b.mark)}</span>`;

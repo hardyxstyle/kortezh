@@ -17,13 +17,21 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, task_id TEXT NOT NULL, answer TEXT, ok INTEGER NOT NULL, message TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
   `CREATE INDEX IF NOT EXISTS idx_attempts_user ON attempts(user_id, id)`,
   `CREATE INDEX IF NOT EXISTS idx_attempts_time ON attempts(id)`,
-  `CREATE TABLE IF NOT EXISTS progress (user_id INTEGER NOT NULL, task_id TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, last_answer TEXT, solved_answer TEXT, first_solved_at TEXT, updated_at TEXT, PRIMARY KEY (user_id, task_id))`,
+  `CREATE TABLE IF NOT EXISTS progress (user_id INTEGER NOT NULL, task_id TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, last_answer TEXT, solved_answer TEXT, first_solved_at TEXT, updated_at TEXT, hints INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, task_id))`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
 ];
 let schemaReady = null;
 export function ensureSchema(env) {
   if (!env.DB) throw new Error('NO_DB');
-  if (!schemaReady) schemaReady = env.DB.batch(SCHEMA.map((s) => env.DB.prepare(s))).catch((e) => { schemaReady = null; throw e; });
+  if (!schemaReady) {
+    schemaReady = env.DB.batch(SCHEMA.map((s) => env.DB.prepare(s)))
+      .then(async () => {
+        // миграции за бази, създадени с по-стара версия
+        const cols = (await env.DB.prepare("SELECT name FROM pragma_table_info('progress')").all()).results.map((r) => r.name);
+        if (!cols.includes('hints')) await env.DB.prepare('ALTER TABLE progress ADD COLUMN hints INTEGER NOT NULL DEFAULT 0').run();
+      })
+      .catch((e) => { schemaReady = null; throw e; });
+  }
   return schemaReady;
 }
 

@@ -1,9 +1,10 @@
 // Кортеж — учителски панел.
-import { $, $$, esc, api, toast, store, when, brand } from '/common.js';
+import { $, $$, esc, api, toast, store, when, brand, initTheme, computeBadges } from '/common.js';
 
 const K = window.KORTEZH;
 const view = $('#view');
 $('#brand').innerHTML = brand;
+initTheme($('#theme'));
 const TASK = {};
 K.lessons.forEach((L) => L.tasks.forEach((t) => { TASK[t.id] = { ...t, lesson: L }; }));
 const taskLabel = (id) => (TASK[id] ? `${id} ${TASK[id].title}` : id);
@@ -98,18 +99,20 @@ async function showLessonMatrix(lessonId) {
   await load();
   const list = students();
   const pm = {};
-  DATA.progress.forEach(([u, t, s, n]) => { pm[u + '|' + t] = { s, n }; });
+  DATA.progress.forEach(([u, t, s, n, h]) => { pm[u + '|' + t] = { s, n, h }; });
   const head = L.tasks.map((t) => `<th class="lh" data-t="${t.id}" title="${esc(t.title)}">${shortId(t.id)}${t.bonus ? '★' : ''}</th>`).join('');
   const rows = list.map((s) => `<tr class="${s.active ? '' : 'off'}"><td class="name"><a href="#/s/${s.id}">${esc(s.name)}</a></td><td>${esc(s.class || '')}</td>${L.tasks.map((t) => {
     const p = pm[s.id + '|' + t.id];
     if (!p) return `<td class="cell" data-t="${t.id}" data-u="${s.id}"></td>`;
-    return `<td class="cell ${p.s ? 'ok' : 'bad'}" data-t="${t.id}" data-u="${s.id}" title="${tries(p.n)}">${p.s ? '✓' : '✗'}${p.n > 1 ? `<small>${p.n}</small>` : ''}</td>`;
+    const hm = p.h ? `<span class="hint-mark" title="ползвал(а) подсказка ${p.h}">п${p.h}</span>` : '';
+    if (!p.n) return `<td class="cell" data-t="${t.id}" data-u="${s.id}">${hm}</td>`;
+    return `<td class="cell ${p.s ? 'ok' : 'bad'}" data-t="${t.id}" data-u="${s.id}" title="${tries(p.n)}${p.h ? ', с подсказка' : ''}">${p.s ? '✓' : '✗'}${p.n > 1 ? `<small>${p.n}</small>` : ''}${hm}</td>`;
   }).join('')}</tr>`).join('');
   const solvedBy = (t) => list.filter((s) => pm[s.id + '|' + t.id]?.s).length;
   view.innerHTML = `<p><a href="#/">← Всички уроци</a></p><h1>Урок ${L.num}. ${esc(L.title)}</h1>${classChips(() => showLessonMatrix(lessonId))}
     <div class="grid-wrap"><table class="grid mx"><thead><tr><th>Ученик</th><th>Клас</th>${head}</tr></thead><tbody>${rows || `<tr><td colspan="${L.tasks.length + 2}" class="empty">Няма ученици.</td></tr>`}</tbody>
     <tfoot><tr><td colspan="2" style="color:var(--ink-3)">Решили</td>${L.tasks.map((t) => `<td class="cell">${solvedBy(t)}</td>`).join('')}</tr></tfoot></table></div>
-    <p class="hint">✓ решена, ✗ опитвана, но още не е решена (малкото число е броят опити). Цъкни задача или клетка, за да видиш какво са написали.</p>
+    <p class="hint">✓ решена, ✗ опитвана, но още не е решена (малкото число е броят опити), „п1“/„п2“ — ползвал(а) подсказка 1 или 2. Цъкни задача или клетка, за да видиш какво са написали.</p>
     <div id="taskpanel" style="margin-top:1.5rem"></div>`;
   $$('[data-t]', view).forEach((c) => c.addEventListener('click', () => showTaskAnswers(c.dataset.t, c.dataset.u)));
 }
@@ -125,7 +128,7 @@ async function showTaskAnswers(taskId, focusUser) {
     ${t.kind === 'choice' ? `<ol>${t.options.map((o) => `<li>${o}</li>`).join('')}</ol>` : ''}
     ${rows.map((r) => `<div id="ans-${r.id}" style="border-top:1px solid var(--rule-soft);padding:.6rem 0;${String(r.id) === String(focusUser) ? 'background:var(--mark-soft);' : ''}">
       <div class="row-flex"><b>${esc(r.name)}</b><span class="hint">${esc(r.class || '')}</span>
-      ${r.tries ? `<span class="${r.solved ? 'mark-ok' : 'mark-bad'}" style="color:${r.solved ? 'var(--ok)' : 'var(--bad)'}">${r.solved ? '✓ решена' : '✗ не е решена'}</span><span class="hint">${tries(r.tries)}, последно ${when(r.updated_at)}</span>` : '<span class="hint">не е опитвана</span>'}</div>
+      ${r.tries ? `<span class="${r.solved ? 'mark-ok' : 'mark-bad'}" style="color:${r.solved ? 'var(--ok)' : 'var(--bad)'}">${r.solved ? '✓ решена' : '✗ не е решена'}</span><span class="hint">${tries(r.tries)}${r.hints ? `, подсказка ${r.hints}` : ''}, последно ${when(r.updated_at)}</span>` : '<span class="hint">не е опитвана</span>'}</div>
       ${r.last_answer != null ? `<div class="code-small">${esc(opt(r.last_answer))}</div>` : ''}
       ${r.solved_answer && r.solved_answer !== r.last_answer ? `<div class="hint">Вярното решение:</div><div class="code-small">${esc(opt(r.solved_answer))}</div>` : ''}
     </div>`).join('')}</div>`;
@@ -151,12 +154,12 @@ async function showStudent(id) {
         return `<tr><td style="width:3rem" class="mono">${shortId(t.id)}${t.bonus ? '★' : ''}</td><td style="white-space:normal">${esc(t.title)}
           ${p?.last_answer != null ? `<div class="code-small">${esc(opt(p.last_answer))}</div>` : ''}
           ${p?.solved_answer && p.solved_answer !== p.last_answer ? `<div class="hint">Вярното решение (${when(p.first_solved_at)}):</div><div class="code-small">${esc(opt(p.solved_answer))}</div>` : ''}</td>
-          <td style="width:9rem">${p ? `<span style="color:${p.solved ? 'var(--ok)' : 'var(--bad)'};font-weight:600">${p.solved ? '✓ решена' : '✗ не е'}</span><br><span class="hint">${tries(p.tries)}</span>` : '<span class="hint">—</span>'}</td></tr>`;
+          <td style="width:9rem">${p ? `<span style="color:${p.solved ? 'var(--ok)' : 'var(--bad)'};font-weight:600">${p.solved ? '✓ решена' : '✗ не е'}</span><br><span class="hint">${tries(p.tries)}${p.hints ? `, подсказка ${p.hints}` : ''}</span>` : '<span class="hint">—</span>'}</td></tr>`;
       }).join('')}</tbody></table></details>`;
   }).join('');
   view.innerHTML = `<p><a href="#/">← Ученици</a></p>
     <h1>${esc(u.name)}</h1>
-    <p class="hint" style="font-size:.95rem">${esc(u.class || 'без клас')}, потребител <b>${esc(u.username)}</b>, регистриран ${when(u.created_at)}, последно активен ${when(u.last_seen)}${u.active ? '' : ', <b style="color:var(--bad)">профилът е спрян</b>'}</p>
+    <p class="hint" style="font-size:.95rem">Значки: <b>${(() => { const pr = {}; d.progress.forEach((x) => { pr[x.task_id] = { s: x.solved, t: x.tries, h: x.hints }; }); return computeBadges(pr, K.lessons).filter((b) => b.got).length; })()}</b>. ${esc(u.class || 'без клас')}, потребител <b>${esc(u.username)}</b>, регистриран ${when(u.created_at)}, последно активен ${when(u.last_seen)}${u.active ? '' : ', <b style="color:var(--bad)">профилът е спрян</b>'}</p>
     <div class="box" style="margin:1rem 0 1.5rem"><div class="row-flex">
       <label class="field" style="margin:0">Клас <select id="cls">${[u.class, ...classes].filter((v, i, a) => v && a.indexOf(v) === i).map((c) => `<option ${c === u.class ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
       <button class="btn small" id="savecls">Запази класа</button>

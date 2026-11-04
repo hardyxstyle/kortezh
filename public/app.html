@@ -5,34 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Кортеж</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect width='30' height='30' fill='%231C2541'/%3E%3Crect x='3' y='12' width='24' height='6' fill='%23FFE45C'/%3E%3C/svg%3E">
+<script>try { var t = localStorage.getItem('kz:theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/vendor/codemirror.css">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="topbar">
-  <button class="btn small ghost menu-btn" id="menu" style="color:#fff" aria-label="Уроци" aria-expanded="false">☰</button>
   <a class="brand" href="#/" id="brand"></a>
-  <nav>
+  <nav aria-label="Основно меню">
     <span class="who" id="who"></span>
-    <a href="#/" data-nav="home">Начало</a>
+    <a href="#/" data-nav="home">Уроци</a>
     <a href="#/sandbox" data-nav="sandbox">Пясъчник</a>
+    <a href="#/rechnik" data-nav="rechnik">Речник</a>
+    <a href="#/znachki" data-nav="znachki">Значки</a>
     <a href="#/account" data-nav="account">Профил</a>
     <a href="/teacher.html" id="tlink" class="hidden">Учителски панел</a>
+    <button class="theme-btn" id="theme"></button>
     <button id="logout">Изход</button>
   </nav>
 </header>
-<div class="layout">
-  <aside class="side" id="side">
-    <h2>Уроци</h2>
-    <ul class="lesson-rows" id="lessons"></ul>
-    <div class="side-extra">
-      <a href="#/sandbox" data-nav="sandbox">Пясъчник — свободни заявки</a>
-    </div>
-  </aside>
-  <main class="main" id="view"><p class="empty">Зареждане…</p></main>
-</div>
+<main class="main" id="view"><p class="empty">Зареждане…</p></main>
 <script src="/vendor/codemirror.js"></script>
 <script src="/vendor/cm-sql.js"></script>
 <script src="/vendor/cm-placeholder.js"></script>

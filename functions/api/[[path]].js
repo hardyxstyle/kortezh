@@ -102,12 +102,12 @@ async function logout({ env, user }) {
 // =====================================================================
 async function me({ env, user }) {
   const [rows, settings] = await Promise.all([
-    env.DB.prepare('SELECT task_id, solved, tries, last_answer, solved_answer FROM progress WHERE user_id = ?').bind(user.id).all(),
+    env.DB.prepare('SELECT task_id, solved, tries, last_answer, solved_answer, hints FROM progress WHERE user_id = ?').bind(user.id).all(),
     getSettings(env),
   ]);
   await env.DB.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now(), user.id).run();
   const progress = {};
-  for (const r of rows.results) progress[r.task_id] = { s: r.solved, t: r.tries, a: r.last_answer, sa: r.solved_answer };
+  for (const r of rows.results) progress[r.task_id] = { s: r.solved, t: r.tries, a: r.last_answer, sa: r.solved_answer, h: r.hints || 0 };
   return json({
     user: { id: user.id, name: user.name, username: user.username, class: user.class, role: user.role },
     progress,
@@ -155,6 +155,20 @@ async function check({ env, user, body }) {
   return json(result);
 }
 
+async function hint({ env, user, body }) {
+  const taskId = String(body.taskId || '');
+  const task = TASKS[taskId];
+  if (!task || !task.hints) return fail('Няма подсказка за тази задача.');
+  const level = Math.min(2, Math.max(1, Number(body.level) || 1));
+  const settings = await getSettings(env);
+  if (user.role !== 'teacher' && settings.closed.includes(task.lesson)) return fail('Този урок още е заключен.');
+  if (user.role !== 'teacher') {
+    await env.DB.prepare(`INSERT INTO progress (user_id, task_id, solved, tries, hints, updated_at) VALUES (?1, ?2, 0, 0, ?3, ?4)
+      ON CONFLICT (user_id, task_id) DO UPDATE SET hints = MAX(hints, excluded.hints)`).bind(user.id, taskId, level, now()).run();
+  }
+  return json({ level, hints: task.hints.slice(0, level) });
+}
+
 async function markRead({ env, user, body }) {
   const id = String(body.lessonId || '');
   if (!LESSONS.find((l) => l.id === id) || user.role === 'teacher') return json({ ok: true });
@@ -196,7 +210,7 @@ async function teacherOverview({ env }) {
   const [classes, users, prog, last, settings] = await Promise.all([
     env.DB.prepare('SELECT c.code, c.name, c.open, c.created_at, (SELECT COUNT(*) FROM users u WHERE u.class = c.name AND u.role = \'student\') AS students FROM classes c ORDER BY c.name').all(),
     env.DB.prepare("SELECT id, username, name, class, active, created_at, last_seen FROM users WHERE role = 'student' ORDER BY class, name").all(),
-    env.DB.prepare('SELECT user_id, task_id, solved, tries FROM progress').all(),
+    env.DB.prepare('SELECT user_id, task_id, solved, tries, hints FROM progress').all(),
     env.DB.prepare('SELECT user_id, MAX(created_at) AS t, COUNT(*) AS n, SUM(ok) AS good FROM attempts GROUP BY user_id').all(),
     getSettings(env),
   ]);
@@ -215,7 +229,7 @@ async function teacherOverview({ env }) {
   return json({
     classes: classes.results,
     students: users.results.map((u) => ({ ...u, stats: stats[u.id] || { lessons: {}, read: [], tries: 0 }, attempts: lastMap[u.id]?.n || 0, good: lastMap[u.id]?.good || 0, lastAttempt: lastMap[u.id]?.t || null })),
-    progress: prog.results.filter((r) => !r.task_id.startsWith('read:')).map((r) => [r.user_id, r.task_id, r.solved, r.tries]),
+    progress: prog.results.filter((r) => !r.task_id.startsWith('read:')).map((r) => [r.user_id, r.task_id, r.solved, r.tries, r.hints || 0]),
     settings,
   });
 }
@@ -224,7 +238,7 @@ async function teacherStudent({ env, extra: id }) {
   const u = await env.DB.prepare('SELECT id, username, name, class, active, created_at, last_seen, role FROM users WHERE id = ?').bind(id).first();
   if (!u || u.role !== 'student') return fail('Няма такъв ученик.', 404);
   const [prog, att] = await Promise.all([
-    env.DB.prepare('SELECT task_id, solved, tries, last_answer, solved_answer, first_solved_at, updated_at FROM progress WHERE user_id = ?').bind(id).all(),
+    env.DB.prepare('SELECT task_id, solved, tries, last_answer, solved_answer, first_solved_at, updated_at, hints FROM progress WHERE user_id = ?').bind(id).all(),
     env.DB.prepare('SELECT id, task_id, answer, ok, message, created_at FROM attempts WHERE user_id = ? ORDER BY id DESC LIMIT 400').bind(id).all(),
   ]);
   return json({ user: u, progress: prog.results, attempts: att.results });
@@ -232,7 +246,7 @@ async function teacherStudent({ env, extra: id }) {
 
 async function teacherTask({ env, extra: taskId }) {
   if (!TASKS[taskId]) return fail('Няма такава задача.', 404);
-  const rows = (await env.DB.prepare(`SELECT u.id, u.name, u.class, p.solved, p.tries, p.last_answer, p.solved_answer, p.updated_at
+  const rows = (await env.DB.prepare(`SELECT u.id, u.name, u.class, p.solved, p.tries, p.last_answer, p.solved_answer, p.updated_at, p.hints
     FROM users u LEFT JOIN progress p ON p.user_id = u.id AND p.task_id = ?
     WHERE u.role = 'student' ORDER BY u.class, u.name`).bind(taskId).all()).results;
   return json({ rows });
@@ -340,6 +354,7 @@ const ROUTES = {
   'GET me': [me, 'user'],
   'POST check': [check, 'user'],
   'POST read': [markRead, 'user'],
+  'POST hint': [hint, 'user'],
   'GET leaderboard': [leaderboard, 'user'],
   'POST password': [changePassword, 'user'],
   'GET t/overview': [teacherOverview, 'teacher'],
