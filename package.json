@@ -1,0 +1,15 @@
+{
+  "name": "kortezh",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Кортеж — SQL платформа за 12. клас (Cloudflare Pages + D1)",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node tools/selftest.mjs && node tools/check-examples.mjs",
+    "dev": "npx wrangler@3 pages dev public --d1 DB=kortezh"
+  },
+  "devDependencies": {
+    "sql.js": "1.10.3",
+    "codemirror": "5.65.16"
+  }
+}

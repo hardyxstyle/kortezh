@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кортеж — първоначална настройка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="landing">
+  <section class="hero">
+    <h1>Кортеж</h1>
+    <p>Първоначална настройка. Създай учителския профил. Тази страница работи само веднъж: след като има учител, се изключва.</p>
+  </section>
+  <section class="auth">
+    <div class="auth-box">
+      <h2 style="margin-top:0">Учителски профил</h2>
+      <div id="err" class="form-error hidden" role="alert"></div>
+      <form id="f">
+        <label class="field">Име и фамилия<input name="name" required></label>
+        <label class="field">Потребителско име<input name="username" required autocomplete="username"></label>
+        <label class="field">Парола<input name="password" type="password" required minlength="8" autocomplete="new-password"><span class="hint">Поне 8 знака.</span></label>
+        <button class="btn primary" type="submit">Създай и влез</button>
+      </form>
+    </div>
+  </section>
+</main>
+<script type="module">
+import { api, $ } from '/common.js';
+const err = $('#err');
+api('status').then((s) => { if (s.hasTeacher) location.replace('/'); }).catch((e) => { err.textContent = e.message; err.classList.remove('hidden'); });
+$('#f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try { await api('setup', Object.fromEntries(new FormData(e.target))); location.replace('/teacher.html'); }
+  catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+});
+</script>
+</body>
+</html>

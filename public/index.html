@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Кортеж — SQL за 12. клас</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect width='30' height='30' fill='%231C2541'/%3E%3Crect x='3' y='12' width='24' height='6' fill='%23FFE45C'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="landing">
+  <section class="hero">
+    <h1>Кортеж</h1>
+    <p>SQL за 12. клас. Уроци с обяснения, задачи, които пишеш, изпълняваш и проверяваш тук, и напредък, който виждаш ти и вижда учителят.</p>
+    <div>
+      <div class="query"><span class="k">SELECT</span> Име, Клас, Урок, Решени
+<span class="k">FROM</span> Ученик
+<span class="k">WHERE</span> Име = <span class="s">'ти'</span>;</div>
+    </div>
+    <div>
+      <div class="rt-wrap"><table class="rt"><thead><tr><th>Име</th><th>Клас</th><th>Урок</th><th>Решени</th></tr></thead>
+      <tbody><tr class="you"><td>ти</td><td>12</td><td>1. Езикът SQL</td><td class="num">0</td></tr></tbody></table></div>
+      <p class="rt-meta">1 ред. Един ред от таблица се нарича кортеж.</p>
+    </div>
+  </section>
+
+  <section class="auth">
+    <div class="auth-box">
+      <div class="tabs" role="tablist">
+        <button class="on" data-tab="login" role="tab" aria-selected="true">Вход</button>
+        <button data-tab="register" role="tab" aria-selected="false">Регистрация</button>
+      </div>
+      <div id="err" class="form-error hidden" role="alert"></div>
+
+      <form id="login" autocomplete="on">
+        <label class="field">Потребителско име<input name="username" autocomplete="username" required></label>
+        <label class="field">Парола<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary" type="submit">Влез</button>
+      </form>
+
+      <form id="register" class="hidden" autocomplete="off">
+        <label class="field">Име и фамилия<input name="name" required maxlength="60" placeholder="напр. Мария Иванова"></label>
+        <label class="field">Потребителско име<input name="username" required maxlength="30" autocomplete="username" placeholder="напр. maria.i">
+          <span class="hint">С него ще влизаш. Без интервали.</span></label>
+        <label class="field">Парола<input name="password" type="password" required minlength="6" autocomplete="new-password">
+          <span class="hint">Поне 6 знака.</span></label>
+        <label class="field">Код на класа<input name="code" required placeholder="напр. 12A-K7QP" style="text-transform:uppercase">
+          <span class="hint">Кода ти го дава учителката.</span></label>
+        <button class="btn primary" type="submit">Създай профил</button>
+      </form>
+    </div>
+  </section>
+</main>
+<script type="module">
+import { api, $, $$ } from '/common.js';
+const go = (role) => location.replace(role === 'teacher' ? '/teacher.html' : '/app.html');
+api('me').then((d) => go(d.user.role)).catch(async () => {
+  try { const s = await api('status'); if (!s.hasTeacher) location.replace('/setup.html'); } catch { /* няма база */ }
+});
+const err = $('#err');
+const showErr = (m) => { err.textContent = m; err.classList.toggle('hidden', !m); };
+$$('.tabs button').forEach((b) => b.addEventListener('click', () => {
+  $$('.tabs button').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', x === b); });
+  $('#login').classList.toggle('hidden', b.dataset.tab !== 'login');
+  $('#register').classList.toggle('hidden', b.dataset.tab !== 'register');
+  showErr('');
+}));
+for (const id of ['login', 'register']) {
+  $('#' + id).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; showErr('');
+    try {
+      const d = await api(id, Object.fromEntries(new FormData(e.target)));
+      go(d.role);
+    } catch (ex) { showErr(ex.message); btn.disabled = false; }
+  });
+}
+</script>
+</body>
+</html>
