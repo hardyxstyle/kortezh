@@ -144,7 +144,19 @@ async function me({ env, user }) {
   });
 }
 
+// Ограничение: най-много 20 проверки/подсказки в минута на ученик (спира скриптове, пази лимита за записи в D1).
+const RATE = new Map();
+function rateLimited(userId) {
+  const now = Date.now();
+  const arr = (RATE.get(userId) || []).filter((t) => now - t < 60e3);
+  arr.push(now);
+  RATE.set(userId, arr);
+  if (RATE.size > 5000) RATE.clear();
+  return arr.length > 20;
+}
+
 async function check({ env, user, body }) {
+  if (rateLimited(user.id)) return fail('Твърде много проверки за минута. Помисли и опитай пак след малко.', 429);
   const taskId = String(body.taskId || '');
   const task = TASKS[taskId];
   if (!task) return fail('Няма такава задача.');
@@ -182,6 +194,7 @@ async function check({ env, user, body }) {
 }
 
 async function hint({ env, user, body }) {
+  if (rateLimited(user.id)) return fail('Твърде много заявки за минута. Опитай пак след малко.', 429);
   const taskId = String(body.taskId || '');
   const task = TASKS[taskId];
   if (!task || !task.hints) return fail('Няма подсказка за тази задача.');
