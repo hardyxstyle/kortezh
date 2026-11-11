@@ -212,18 +212,52 @@ async function showActivity() {
 async function showClasses() {
   await load();
   const site = location.origin;
-  view.innerHTML = `<h1>Класове и кодове за регистрация</h1>
+  const clsNames = [...new Set([...DATA.classes.map((c) => c.name), ...DATA.students.map((s) => s.class).filter(Boolean)])].sort();
+  view.innerHTML = `<h1>Класове и ученици</h1>
+    <div class="box" style="margin-bottom:1.2rem"><h2>Добави ученици</h2>
+      <p class="hint" style="margin-top:0">Самостоятелната регистрация е изключена (някой се опита да налучка кода с хиляди автоматични заявки). Постави имената — по едно на ред — и сайтът ще създаде профилите с потребителско име и парола.</p>
+      <div id="smsg"></div>
+      <form id="news"><div class="row-flex" style="align-items:flex-start">
+        <label class="field" style="min-width:160px">Клас<select name="class">${clsNames.map((c) => `<option>${esc(c)}</option>`).join('')}</select></label>
+        <label class="field" style="flex:1;min-width:260px">Имена (по едно на ред)<textarea name="names" rows="6" style="display:block;width:100%;margin-top:.3rem;padding:.6em .7em;border:1.5px solid var(--rule);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit" placeholder="Мария Иванова&#10;Петър Петров"></textarea></label>
+      </div><button class="btn primary">Създай профилите</button></form>
+      <div id="created"></div>
+    </div>
     <div class="cards2"><div class="box"><h2>Нов клас</h2><div id="cmsg"></div>
       <form id="newc"><label class="field">Име на класа<input name="name" required maxlength="20" placeholder="напр. 12а"></label>
       <label class="field">Код (по желание)<input name="code" maxlength="20" placeholder="остави празно за случаен" style="text-transform:uppercase"><span class="hint">Латински букви, цифри и тире.</span></label>
       <button class="btn primary">Създай клас</button></form></div>
-    <div class="box"><h2>Как се регистрират учениците</h2><p>Отварят <b class="mono">${esc(site)}</b>, натискат „Регистрация“ и въвеждат името си, потребителско име, парола и кода на класа.</p><p class="hint">Когато всички са се регистрирали, затвори регистрацията за класа, за да не може никой друг да влезе с кода.</p></div></div>
+    <div class="box"><h2>Как влизат учениците</h2><p>Отварят <b class="mono">${esc(site)}</b> и влизат с потребителското име и паролата, които им даваш. После могат да си сменят паролата от „Профил“.</p><p class="hint">Ако някой забрави паролата, отвори го от „Ученици“ и натисни „Нова парола“.</p></div></div>
     <h2 class="section">Класове</h2>
-    ${DATA.classes.length ? `<div class="grid-wrap"><table class="grid"><thead><tr><th>Клас</th><th>Код</th><th>Ученици</th><th>Регистрация</th><th></th></tr></thead><tbody>
+    ${DATA.classes.length ? `<div class="grid-wrap"><table class="grid"><thead><tr><th>Клас</th><th>Код</th><th>Ученици</th><th>Регистрация с код</th><th></th></tr></thead><tbody>
     ${DATA.classes.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td><span class="big-code">${esc(c.code)}</span></td><td>${c.students}</td>
-      <td><button class="btn small" data-toggle="${esc(c.code)}">${c.open ? 'Отворена, затвори' : 'Затворена, отвори'}</button></td>
+      <td><span class="hint">изключена</span></td>
       <td><button class="btn small ghost" data-del="${esc(c.code)}">Изтрий кода</button></td></tr>`).join('')}</tbody></table></div>
       <p class="hint">Изтриването на код не трие учениците, само спира регистрацията с него.</p>` : '<p class="hint">Още няма класове.</p>'}`;
+  $('#news').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const names = String(fd.get('names') || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    if (!names.length) { $('#smsg').innerHTML = '<div class="form-error">Напиши поне едно име.</div>'; return; }
+    if (!fd.get('class')) { $('#smsg').innerHTML = '<div class="form-error">Първо създай клас отдолу.</div>'; return; }
+    const btn = e.target.querySelector('button'); btn.disabled = true;
+    const out = [];
+    for (const n of names) {
+      $('#smsg').innerHTML = `<div class="msg info">Създавам ${out.length + 1} от ${names.length}…</div>`;
+      try { out.push(await api('t/student/create', { name: n, class: fd.get('class') })); }
+      catch (ex) { out.push({ name: n, error: ex.message }); }
+    }
+    btn.disabled = false;
+    $('#smsg').innerHTML = '<div class="form-ok">Готово. Запиши или принтирай паролите сега — после не се виждат (може само да се зададе нова).</div>';
+    $('#created').innerHTML = `<div class="grid-wrap" style="margin-top:.8rem"><table class="grid" id="ptab"><thead><tr><th>Име</th><th>Клас</th><th>Потребителско име</th><th>Парола</th></tr></thead><tbody>${out.map((r) => r.error ? `<tr><td>${esc(r.name)}</td><td colspan="3" style="color:var(--bad)">${esc(r.error)}</td></tr>` : `<tr><td>${esc(r.name)}</td><td>${esc(r.class)}</td><td class="mono"><b>${esc(r.username)}</b></td><td class="mono"><b>${esc(r.password)}</b></td></tr>`).join('')}</tbody></table></div>
+      <div class="row-flex" style="margin-top:.6rem"><button class="btn small" id="printpw">Принтирай</button><span class="hint">Адрес: ${esc(site)}</span></div>`;
+    $('#printpw').addEventListener('click', () => {
+      const w = window.open('', '_blank');
+      w.document.write(`<html><head><meta charset="utf-8"><title>Профили</title><style>body{font-family:sans-serif}td{border:1px dashed #999;padding:14px 18px}table{border-collapse:collapse}</style></head><body><table>${out.filter((r) => !r.error).map((r) => `<tr><td><b>${esc(r.name)}</b> (${esc(r.class)})<br>Сайт: ${esc(site)}<br>Потребител: <b>${esc(r.username)}</b><br>Парола: <b>${esc(r.password)}</b></td></tr>`).join('')}</table></body></html>`);
+      w.document.close(); w.print();
+    });
+    DATA = null;
+  });
   $('#newc').addEventListener('submit', async (e) => {
     e.preventDefault();
     try { const r = await api('t/class', Object.fromEntries(new FormData(e.target))); toast('Създаден е код ' + r.code); showClasses(); }

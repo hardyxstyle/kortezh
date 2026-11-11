@@ -67,6 +67,9 @@ function validateNew(b, teacher) {
 }
 
 async function register({ env, body }) {
+  // Самостоятелната регистрация е изключена (беше атакувана с налучкване на кодове).
+  // Профилите се създават от учителя: Класове → Добави ученици.
+  return fail('Регистрацията е изключена. Профила ти го създава учителката.', 403);
   const v = validateNew(body, false);
   if (v) return fail(v);
   const code = String(body.code || '').trim().toUpperCase();
@@ -82,11 +85,34 @@ async function register({ env, body }) {
   return json({ ok: true, role: 'student' }, 200, { 'set-cookie': cookie });
 }
 
-async function login({ env, body }) {
+// Защита от налучкване на пароли: 10 грешни опита за едно потребителско име или 200 от един адрес
+// (в училище целият клас е зад един адрес) → 15 минути пауза.
+const FAILS = new Map();
+const WINDOW = 15 * 60e3;
+const ipOf = (request) => request.headers.get('cf-connecting-ip') || 'local';
+function tooMany(key, max) {
+  const f = FAILS.get(key);
+  if (!f) return false;
+  if (Date.now() - f.first > WINDOW) { FAILS.delete(key); return false; }
+  return f.n >= max;
+}
+function addFail(key) {
+  const f = FAILS.get(key);
+  if (!f || Date.now() - f.first > WINDOW) FAILS.set(key, { n: 1, first: Date.now() });
+  else f.n++;
+  if (FAILS.size > 5000) FAILS.clear();
+}
+
+async function login({ env, body, request }) {
+  const ip = ipOf(request);
+  const uname = String(body.username || '').trim().toLowerCase();
+  const kIp = 'ip:' + ip, kUser = 'u:' + ip + ':' + uname;
+  if (tooMany(kIp, 200) || tooMany(kUser, 10)) return fail('Твърде много грешни опити. Опитай пак след 15 минути.', 429);
+  const bad = () => { addFail(kIp); addFail(kUser); return fail('Грешно потребителско име или парола.'); };
   const u = await env.DB.prepare('SELECT id, role, pass, salt, active FROM users WHERE username = ?').bind(String(body.username || '').trim()).first();
-  if (!u) return fail('Грешно потребителско име или парола.');
+  if (!u) return bad();
   const h = await hashPassword(String(body.password || ''), u.salt);
-  if (!safeEqual(h, u.pass)) return fail('Грешно потребителско име или парола.');
+  if (!safeEqual(h, u.pass)) return bad();
   if (!u.active) return fail('Профилът ти е спрян. Попитай учителката.');
   const cookie = await createSession(env, u.id);
   return json({ ok: true, role: u.role }, 200, { 'set-cookie': cookie });
@@ -271,6 +297,29 @@ function makeCode(name) {
   return `${base}-${s}`;
 }
 
+const TR = { 'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sht', 'ъ': 'a', 'ь': 'y', 'ю': 'yu', 'я': 'ya' };
+const translit = (s) => [...String(s).toLowerCase()].map((c) => (TR[c] !== undefined ? TR[c] : c)).join('').replace(/[^a-z0-9]/g, '');
+const PW_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+function randomPassword(n = 7) {
+  let s = '';
+  for (const b of crypto.getRandomValues(new Uint8Array(n))) s += PW_CHARS[b % PW_CHARS.length];
+  return s;
+}
+async function teacherStudentCreate({ env, body }) {
+  const name = String(body.name || '').trim().replace(/\s+/g, ' ');
+  const cls = String(body.class || '').trim();
+  if (name.length < 3 || name.length > 60) return fail('Името трябва да е 3–60 знака.');
+  if (!cls) return fail('Избери клас.');
+  const parts = name.split(' ');
+  const base = (translit(parts[0]) + (parts.length > 1 ? '.' + translit(parts[parts.length - 1]) : '')).slice(0, 26) || 'uchenik';
+  let username = base, k = 1;
+  while (await env.DB.prepare('SELECT 1 FROM users WHERE username = ?').bind(username).first()) username = base + (++k);
+  const password = randomPassword();
+  const salt = randomHex(16);
+  await env.DB.prepare("INSERT INTO users (username, name, class, role, pass, salt) VALUES (?, ?, ?, 'student', ?, ?)").bind(username, name, cls, await hashPassword(password, salt), salt).run();
+  return json({ ok: true, name, username, password, class: cls });
+}
+
 async function teacherClassCreate({ env, body }) {
   const name = String(body.name || '').trim();
   if (!name || name.length > 20) return fail('Напиши име на класа, напр. 12а.');
@@ -360,6 +409,7 @@ const ROUTES = {
   'GET t/overview': [teacherOverview, 'teacher'],
   'GET t/activity': [teacherActivity, 'teacher'],
   'POST t/class': [teacherClassCreate, 'teacher'],
+  'POST t/student/create': [teacherStudentCreate, 'teacher'],
   'POST t/class/toggle': [teacherClassToggle, 'teacher'],
   'POST t/class/delete': [teacherClassDelete, 'teacher'],
   'POST t/student/update': [teacherStudentUpdate, 'teacher'],
