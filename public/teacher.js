@@ -289,11 +289,33 @@ async function showLessons() {
   });
 }
 
-function showAccount() {
-  view.innerHTML = `<h1>Профил</h1><div class="box" style="max-width:420px"><h2>Смяна на паролата</h2><div id="pwmsg"></div>
+async function showAccount() {
+  view.innerHTML = `<h1>Профил</h1><div class="cards2"><div class="box"><h2>Смяна на паролата</h2><div id="pwmsg"></div>
     <form id="pw"><label class="field">Сегашна парола<input type="password" name="old" required autocomplete="current-password"></label>
     <label class="field">Нова парола<input type="password" name="new" required minlength="8" autocomplete="new-password"><span class="hint">Поне 8 знака.</span></label>
-    <button class="btn primary">Смени паролата</button></form></div>`;
+    <button class="btn primary">Смени паролата</button></form></div>
+    <div class="box"><h2>Учители</h2><p class="hint" style="margin-top:0">Всеки учител вижда всички класове и ученици и може да създава профили и да заключва уроци.</p>
+      <div id="tlist"><p class="hint">Зареждане…</p></div>
+      <div id="tmsg"></div>
+      <form id="newt" class="row-flex" style="margin-top:.8rem;align-items:flex-end"><label class="field" style="margin:0;flex:1;min-width:200px">Име и фамилия на колегата<input name="name" required maxlength="60"></label><button class="btn primary">Добави учител</button></form>
+    </div></div>`;
+  const drawTeachers = async () => {
+    const d = await api('t/teachers');
+    $('#tlist').innerHTML = `<table class="grid"><tbody>${d.rows.map((r) => `<tr><td><b>${esc(r.name)}</b>${r.me ? ' (ти)' : ''}<br><span class="hint mono">${esc(r.username)}</span></td><td class="hint">последно ${when(r.last_seen || r.created_at)}</td><td>${r.me ? '' : `<button class="btn small ghost" data-tdel="${r.id}" data-name="${esc(r.name)}">Изтрий</button>`}</td></tr>`).join('')}</tbody></table>`;
+    $$('[data-tdel]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm(`Да изтрия ли учителския профил на ${b.dataset.name}?`)) return;
+      try { await api('t/teacher/delete', { id: Number(b.dataset.tdel) }); drawTeachers(); } catch (e) { toast(e.message); }
+    }));
+  };
+  drawTeachers();
+  $('#newt').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('t/teacher/create', Object.fromEntries(new FormData(e.target)));
+      $('#tmsg').innerHTML = `<div class="form-ok" style="margin-top:.8rem">Профилът е създаден. Дай на колегата:<br>Адрес: <b>${esc(location.origin)}</b><br>Потребител: <b class="mono">${esc(r.username)}</b><br>Парола: <b class="mono">${esc(r.password)}</b><br><span class="hint">Паролата се вижда само сега — колегата може да я смени от „Профил“.</span></div>`;
+      e.target.reset(); drawTeachers();
+    } catch (ex) { $('#tmsg').innerHTML = `<div class="form-error" style="margin-top:.8rem">${esc(ex.message)}</div>`; }
+  });
   $('#pw').addEventListener('submit', async (e) => {
     e.preventDefault();
     try { await api('password', Object.fromEntries(new FormData(e.target))); $('#pwmsg').innerHTML = '<div class="form-ok">Паролата е сменена.</div>'; e.target.reset(); }

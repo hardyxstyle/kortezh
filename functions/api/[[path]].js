@@ -333,6 +333,32 @@ async function teacherStudentCreate({ env, body }) {
   return json({ ok: true, name, username, password, class: cls });
 }
 
+async function teacherList({ env, user }) {
+  const rows = (await env.DB.prepare("SELECT id, username, name, created_at, last_seen FROM users WHERE role = 'teacher' ORDER BY id").all()).results;
+  return json({ rows: rows.map((r) => ({ ...r, me: r.id === user.id })) });
+}
+async function teacherCreate({ env, body }) {
+  const name = String(body.name || '').trim().replace(/\s+/g, ' ');
+  if (name.length < 3 || name.length > 60) return fail('Името трябва да е 3–60 знака.');
+  const parts = name.split(' ');
+  const base = (translit(parts[0]) + (parts.length > 1 ? '.' + translit(parts[parts.length - 1]) : '')).slice(0, 26) || 'uchitel';
+  let username = base, k = 1;
+  while (await env.DB.prepare('SELECT 1 FROM users WHERE username = ?').bind(username).first()) username = base + (++k);
+  const password = randomPassword(10);
+  const salt = randomHex(16);
+  await env.DB.prepare("INSERT INTO users (username, name, class, role, pass, salt) VALUES (?, ?, NULL, 'teacher', ?, ?)").bind(username, name, await hashPassword(password, salt), salt).run();
+  return json({ ok: true, name, username, password });
+}
+async function teacherDelete({ env, user, body }) {
+  const id = Number(body.id);
+  if (id === user.id) return fail('Не можеш да изтриеш собствения си профил.');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),
+    env.DB.prepare("DELETE FROM users WHERE id = ? AND role = 'teacher'").bind(id),
+  ]);
+  return json({ ok: true });
+}
+
 async function teacherClassCreate({ env, body }) {
   const name = String(body.name || '').trim();
   if (!name || name.length > 20) return fail('Напиши име на класа, напр. 12а.');
@@ -423,6 +449,9 @@ const ROUTES = {
   'GET t/activity': [teacherActivity, 'teacher'],
   'POST t/class': [teacherClassCreate, 'teacher'],
   'POST t/student/create': [teacherStudentCreate, 'teacher'],
+  'GET t/teachers': [teacherList, 'teacher'],
+  'POST t/teacher/create': [teacherCreate, 'teacher'],
+  'POST t/teacher/delete': [teacherDelete, 'teacher'],
   'POST t/class/toggle': [teacherClassToggle, 'teacher'],
   'POST t/class/delete': [teacherClassDelete, 'teacher'],
   'POST t/student/update': [teacherStudentUpdate, 'teacher'],
