@@ -50,10 +50,8 @@ async function boot() {
   route();
 }
 
-const weakPw = () => { try { return sessionStorage.getItem('kz:weak') === '1'; } catch { return false; } };
 function route() {
   if (!ME) return;
-  if (weakPw() && ME.role !== 'teacher' && location.hash !== '#/account') { location.hash = '#/account'; return; }
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const [a, b, c, d] = parts;
   $$('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === (a || 'home') || (a === 'l' && x.dataset.nav === 'home')));
@@ -421,17 +419,17 @@ function showBadges() {
 }
 
 function showAccount() {
-  view.innerHTML = `<div class="col"><h1>Профил</h1>${weakPw() && ME.role !== 'teacher' ? '<div class="msg bad" style="font-size:1.02rem">Паролата ти е твърде лесна за налучкване. Смени я, за да продължиш — поне 8 знака, не само цифри и без името ти.</div>' : ''}
+  view.innerHTML = `<div class="col"><h1>Профил</h1>
     <div class="cards2"><div class="card pad"><h2 style="margin-top:0">Данни</h2>
       <p>Име: <b>${esc(ME.name)}</b><br>Потребителско име: <b>${esc(ME.username)}</b><br>${ME.class ? `Клас: <b>${esc(ME.class)}</b>` : ''}</p>
       <p class="hint">Ако нещо е сгрешено, кажи на учителката — тя може да го поправи.</p></div>
     <div class="card pad"><h2 style="margin-top:0">Смяна на паролата</h2><div id="pwmsg"></div>
       <form id="pw"><label class="field">Сегашна парола<input type="password" name="old" required autocomplete="current-password"></label>
-      <label class="field">Нова парола<input type="password" name="new" required minlength="8" autocomplete="new-password"><span class="hint">Поне 8 знака, не само цифри и без името ти.</span></label>
+      <label class="field">Нова парола<input type="password" name="new" required minlength="6" autocomplete="new-password"></label>
       <button class="btn primary">Смени паролата</button></form></div></div></div>`;
   $('#pw').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await api('password', Object.fromEntries(new FormData(e.target))); try { sessionStorage.removeItem('kz:weak'); } catch { /* */ } $('#pwmsg').innerHTML = '<div class="form-ok">Паролата е сменена. <a href="#/">Към уроците</a></div>'; e.target.reset(); }
+    try { await api('password', Object.fromEntries(new FormData(e.target))); $('#pwmsg').innerHTML = '<div class="form-ok">Паролата е сменена. <a href="#/">Към уроците</a></div>'; e.target.reset(); }
     catch (ex) { $('#pwmsg').innerHTML = `<div class="form-error">${esc(ex.message)}</div>`; }
   });
 }
