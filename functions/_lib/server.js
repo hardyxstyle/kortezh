@@ -6,7 +6,7 @@ import { DB_SEEDS } from './content.js';
 
 // ---------- отговори ----------
 export const json = (data, status = 200, headers = {}) =>
-  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } });
+  new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers } });
 export const fail = (message, status = 400) => json({ error: message }, status);
 
 // ---------- схема на D1 ----------
@@ -113,5 +113,13 @@ export async function dbFactory(dbName) {
 }
 
 export async function readJson(request) {
-  try { return await request.json(); } catch { return {}; }
+  // заявки над 32 KB не се четат (най-дългият отговор е заявка до 6000 знака)
+  const len = Number(request.headers.get('content-length') || 0);
+  if (len > 32768) return {};
+  try {
+    const text = await request.text();
+    if (text.length > 32768) return {};
+    const v = JSON.parse(text);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
 }

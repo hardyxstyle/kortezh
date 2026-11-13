@@ -69,13 +69,14 @@ $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
   $('#register').classList.toggle('hidden', b.dataset.tab !== 'register');
   showErr('');
 }));
-for (const id of ['login', 'register']) {
+for (const id of ['login']) {
   $('#' + id).addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button');
     btn.disabled = true; showErr('');
     try {
       const d = await api(id, Object.fromEntries(new FormData(e.target)));
+      try { if (d.weak) sessionStorage.setItem('kz:weak', '1'); else sessionStorage.removeItem('kz:weak'); } catch { /* */ }
       go(d.role);
     } catch (ex) { showErr(ex.message); btn.disabled = false; }
   });

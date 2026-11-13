@@ -103,6 +103,12 @@ function addFail(key) {
   if (FAILS.size > 5000) FAILS.clear();
 }
 
+const COMMON = new Set(['123456', '1234567', '12345678', '123456789', '1234567890', 'password', 'parola', 'qwerty', 'qwertyui', 'asdfgh', '111111', '000000', '123123', 'abc123', 'iloveyou', 'kortezh', 'parola123', 'password1']);
+function isWeak(pw, uname) {
+  const p = pw.toLowerCase();
+  return pw.length < 8 || COMMON.has(p) || /^\d+$/.test(pw) || /^(.)\1+$/.test(pw) || (uname && p.includes(uname.split('.')[0]));
+}
+
 async function login({ env, body, request }) {
   const ip = ipOf(request);
   const uname = String(body.username || '').trim().toLowerCase();
@@ -110,12 +116,12 @@ async function login({ env, body, request }) {
   if (tooMany(kIp, 200) || tooMany(kUser, 10)) return fail('Твърде много грешни опити. Опитай пак след 15 минути.', 429);
   const bad = () => { addFail(kIp); addFail(kUser); return fail('Грешно потребителско име или парола.'); };
   const u = await env.DB.prepare('SELECT id, role, pass, salt, active FROM users WHERE username = ?').bind(String(body.username || '').trim()).first();
-  if (!u) return bad();
-  const h = await hashPassword(String(body.password || ''), u.salt);
-  if (!safeEqual(h, u.pass)) return bad();
+  // хешираме и при несъществуващо име, за да не личи по времето кои имена съществуват
+  const h = await hashPassword(String(body.password || ''), u ? u.salt : 'no-such-user-salt');
+  if (!u || !safeEqual(h, u.pass)) return bad();
   if (!u.active) return fail('Профилът ти е спрян. Попитай учителката.');
   const cookie = await createSession(env, u.id);
-  return json({ ok: true, role: u.role }, 200, { 'set-cookie': cookie });
+  return json({ ok: true, role: u.role, weak: isWeak(String(body.password || ''), uname) }, 200, { 'set-cookie': cookie });
 }
 
 async function logout({ env, user }) {
@@ -230,11 +236,13 @@ async function changePassword({ env, user, body }) {
   const u = await env.DB.prepare('SELECT pass, salt FROM users WHERE id = ?').bind(user.id).first();
   const h = await hashPassword(String(body.old || ''), u.salt);
   if (!safeEqual(h, u.pass)) return fail('Старата парола не е вярна.');
-  const min = user.role === 'teacher' ? 8 : 6;
-  if (!body.new || body.new.length < min) return fail(`Новата парола трябва да е поне ${min} знака.`);
+  const nw = String(body.new || '');
+  if (nw.length < 8) return fail('Новата парола трябва да е поне 8 знака.');
+  if (nw.length > 200) return fail('Паролата е твърде дълга.');
+  if (isWeak(nw, user.username.toLowerCase())) return fail('Паролата е твърде лесна (само цифри, популярна парола или съдържа името ти). Избери друга.');
   const salt = randomHex(16);
   await env.DB.batch([
-    env.DB.prepare('UPDATE users SET pass = ?, salt = ? WHERE id = ?').bind(await hashPassword(body.new, salt), salt, user.id),
+    env.DB.prepare('UPDATE users SET pass = ?, salt = ? WHERE id = ?').bind(await hashPassword(nw, salt), salt, user.id),
     env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').bind(user.id, user.token),
   ]);
   return json({ ok: true });
