@@ -215,7 +215,7 @@ async function showClasses() {
   const clsNames = [...new Set([...DATA.classes.map((c) => c.name), ...DATA.students.map((s) => s.class).filter(Boolean)])].sort();
   view.innerHTML = `<h1>Класове и ученици</h1>
     <div class="box" style="margin-bottom:1.2rem"><h2>Добави ученици</h2>
-      <p class="hint" style="margin-top:0">Самостоятелната регистрация е изключена (някой се опита да налучка кода с хиляди автоматични заявки). Постави имената — по едно на ред — и сайтът ще създаде профилите с потребителско име и парола.</p>
+      <p class="hint" style="margin-top:0">Самостоятелната регистрация е изключена (някой се опита да налучка кода с хиляди автоматични заявки). Постави имената — по едно на ред, може и целия клас — и сайтът ще създаде профили само на тези, които още нямат.</p>
       <div id="smsg"></div>
       <form id="news"><div class="row-flex" style="align-items:flex-start">
         <label class="field" style="min-width:160px">Клас<select name="class">${clsNames.map((c) => `<option>${esc(c)}</option>`).join('')}</select></label>
@@ -248,12 +248,13 @@ async function showClasses() {
       catch (ex) { out.push({ name: n, error: ex.message }); }
     }
     btn.disabled = false;
-    $('#smsg').innerHTML = '<div class="form-ok">Готово. Запиши или принтирай паролите сега — после не се виждат (може само да се зададе нова).</div>';
-    $('#created').innerHTML = `<div class="grid-wrap" style="margin-top:.8rem"><table class="grid" id="ptab"><thead><tr><th>Име</th><th>Клас</th><th>Потребителско име</th><th>Парола</th></tr></thead><tbody>${out.map((r) => r.error ? `<tr><td>${esc(r.name)}</td><td colspan="3" style="color:var(--bad)">${esc(r.error)}</td></tr>` : `<tr><td>${esc(r.name)}</td><td>${esc(r.class)}</td><td class="mono"><b>${esc(r.username)}</b></td><td class="mono"><b>${esc(r.password)}</b></td></tr>`).join('')}</tbody></table></div>
+    const made = out.filter((r) => !r.error && !r.skipped).length, had = out.filter((r) => r.skipped).length;
+    $('#smsg').innerHTML = `<div class="form-ok">Готово: създадени ${made}, вече имаха профил ${had}. Запиши или принтирай новите пароли сега — после не се виждат (може само да се зададе нова).</div>`;
+    $('#created').innerHTML = `<div class="grid-wrap" style="margin-top:.8rem"><table class="grid" id="ptab"><thead><tr><th>Име</th><th>Клас</th><th>Потребителско име</th><th>Парола</th></tr></thead><tbody>${out.map((r) => r.error ? `<tr><td>${esc(r.name)}</td><td colspan="3" style="color:var(--bad)">${esc(r.error)}</td></tr>` : r.skipped ? `<tr style="opacity:.6"><td>${esc(r.name)}</td><td>${esc(r.class)}</td><td class="mono">${esc(r.username)}</td><td class="hint">вече има профил</td></tr>` : `<tr><td>${esc(r.name)}</td><td>${esc(r.class)}</td><td class="mono"><b>${esc(r.username)}</b></td><td class="mono"><b>${esc(r.password)}</b></td></tr>`).join('')}</tbody></table></div>
       <div class="row-flex" style="margin-top:.6rem"><button class="btn small" id="printpw">Принтирай</button><span class="hint">Адрес: ${esc(site)}</span></div>`;
     $('#printpw').addEventListener('click', () => {
       const w = window.open('', '_blank');
-      w.document.write(`<html><head><meta charset="utf-8"><title>Профили</title><style>body{font-family:sans-serif}td{border:1px dashed #999;padding:14px 18px}table{border-collapse:collapse}</style></head><body><table>${out.filter((r) => !r.error).map((r) => `<tr><td><b>${esc(r.name)}</b> (${esc(r.class)})<br>Сайт: ${esc(site)}<br>Потребител: <b>${esc(r.username)}</b><br>Парола: <b>${esc(r.password)}</b></td></tr>`).join('')}</table></body></html>`);
+      w.document.write(`<html><head><meta charset="utf-8"><title>Профили</title><style>body{font-family:sans-serif}td{border:1px dashed #999;padding:14px 18px}table{border-collapse:collapse}</style></head><body><table>${out.filter((r) => !r.error && !r.skipped).map((r) => `<tr><td><b>${esc(r.name)}</b> (${esc(r.class)})<br>Сайт: ${esc(site)}<br>Потребител: <b>${esc(r.username)}</b><br>Парола: <b>${esc(r.password)}</b></td></tr>`).join('')}</table></body></html>`);
       w.document.close(); w.print();
     });
     DATA = null;

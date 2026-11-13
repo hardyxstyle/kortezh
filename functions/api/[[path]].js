@@ -323,6 +323,10 @@ async function teacherStudentCreate({ env, body }) {
   const cls = String(body.class || '').trim();
   if (name.length < 3 || name.length > 60) return fail('Името трябва да е 3–60 знака.');
   if (!cls) return fail('Избери клас.');
+  // Ако в класа вече има ученик с това име — не създаваме нов профил.
+  const norm = (x) => String(x || '').toLocaleLowerCase('bg').replace(/\s+/g, ' ').trim();
+  const same = (await env.DB.prepare("SELECT name, username FROM users WHERE role = 'student' AND class = ?").bind(cls).all()).results.find((r) => norm(r.name) === norm(name));
+  if (same) return json({ ok: true, skipped: true, name, username: same.username, class: cls });
   const parts = name.split(' ');
   const base = (translit(parts[0]) + (parts.length > 1 ? '.' + translit(parts[parts.length - 1]) : '')).slice(0, 26) || 'uchenik';
   let username = base, k = 1;
