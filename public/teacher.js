@@ -40,7 +40,9 @@ async function boot() {
 window.addEventListener('hashchange', route);
 $('#logout').addEventListener('click', async () => { try { await api('logout', {}); } finally { location.replace('/'); } });
 
+let examTimer = null;
 async function route() {
+  clearInterval(examTimer); examTimer = null;
   const h = location.hash.replace(/^#\/?/, '');
   const [a, b] = h.split('/');
   $$('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === (a || '')));
@@ -50,6 +52,7 @@ async function route() {
     if (a === 'activity') return await showActivity();
     if (a === 'classes') return await showClasses();
     if (a === 'lessons') return await showLessons();
+    if (a === 'exam') return await showExam(b);
     if (a === 'account') return showAccount();
     return await showOverview();
   } catch (e) {
@@ -289,6 +292,70 @@ async function showLessons() {
     catch (e) { toast(e.message); }
   });
 }
+// ---------------------------------------------------------------
+// Контролно: кой е започнал, колко време му остава, колко пъти е излизал
+const EXAM_LESSONS = K.lessons.filter((L) => L.exam);
+const EXIT_NAME = { fullscreen: 'излезе от цял екран', tab: 'смени раздела / скри браузъра', blur: 'отиде в друга програма', reload: 'отвори страницата наново', back: 'върна се', manual: 'предаде', start: 'започна', unlock: 'учителят разреши да продължи' };
+const clock = (ms) => new Date(ms).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const dur = (s) => (s >= 60 ? `${Math.floor(s / 60)} мин ${s % 60} сек` : `${s} сек`);
+
+async function showExam(lessonId) {
+  clearInterval(examTimer); examTimer = null;
+  const L = EXAM_LESSONS.find((x) => x.id === lessonId) || EXAM_LESSONS[0];
+  if (!L) { view.innerHTML = '<div class="box empty">Няма урок, отбелязан като контролно.</div>'; return; }
+  const tasks = L.tasks.filter((t) => t.kind === 'sql');
+  let openLog = '';
+  const draw = async () => {
+    if (!location.hash.startsWith('#/exam')) return;
+    const d = await api('t/exams?lesson=' + L.id);
+    const rows = d.rows.filter((r) => !CLS || r.class === CLS);
+    const status = (e) => {
+      if (!e) return '<span class="hint">не е започнал(а)</span>';
+      if (e.submittedAt) return e.reason === 'exits' ? '<b style="color:var(--bad)">предадено — излизане</b>' : e.reason === 'time' ? '<b>предадено — времето изтече</b>' : '<b style="color:var(--ok)">предадено</b>';
+      const left = Math.max(0, Math.round((e.endsAt - d.now) / 60000));
+      return `<b>решава</b>${e.out ? ' <b style="color:var(--bad)">(в момента е навън)</b>' : ''}<br><span class="hint">остават ~${left} мин</span>`;
+    };
+    const cnt = { none: 0, run: 0, done: 0 };
+    rows.forEach((r) => { cnt[!r.exam ? 'none' : r.exam.submittedAt ? 'done' : 'run']++; });
+    $('#extable').innerHTML = rows.length ? `<p class="hint">Не са започнали: <b>${cnt.none}</b> · Решават: <b>${cnt.run}</b> · Предали: <b>${cnt.done}</b>. Таблицата се обновява на всеки 10 секунди.</p>
+      <div class="grid-wrap"><table class="grid"><thead><tr><th>Ученик</th><th>Клас</th><th>Състояние</th><th>Започна</th><th>Излизания</th><th>Решени</th><th></th></tr></thead><tbody>${rows.map((r) => {
+        const e = r.exam;
+        const solved = tasks.filter((t) => r.tasks[t.id]?.[0]).length;
+        const log = e ? e.log.filter((x) => x[1] !== 'start').map((x) => `${clock(x[0])} — ${EXIT_NAME[x[1]] || esc(x[1])}${x[1] === 'back' && x[2] != null ? ` (навън ${dur(x[2])})` : ''}`).join('<br>') : '';
+        return `<tr class="${r.active ? '' : 'off'}"><td class="name"><a href="#/s/${r.id}">${esc(r.name)}</a></td><td>${esc(r.class || '')}</td><td>${status(e)}</td>
+          <td>${e ? clock(e.startedAt).slice(0, 5) : '—'}</td>
+          <td class="cell">${e ? `<b style="${e.exits ? 'color:var(--bad)' : ''}">${e.exits}</b>${log ? `<details class="exam-log" ${openLog === String(r.id) ? 'open' : ''} data-u="${r.id}"><summary>дневник</summary>${log}</details>` : ''}` : ''}</td>
+          <td class="cell">${e || solved ? `${solved}/${tasks.length}` : ''}</td>
+          <td>${e ? `${e.submittedAt ? `<button class="btn small" data-unlock="${r.id}" data-name="${esc(r.name)}">Разреши да продължи</button> ` : ''}<button class="btn small ghost" data-restart="${r.id}" data-name="${esc(r.name)}">Отначало</button>` : ''}</td></tr>`;
+      }).join('')}</tbody></table></div>` : '<div class="box empty">Няма ученици.</div>';
+    $$('details[data-u]').forEach((x) => x.addEventListener('toggle', () => { if (x.open) openLog = x.dataset.u; else if (openLog === x.dataset.u) openLog = ''; }));
+    $$('[data-unlock]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm(`${b.dataset.name} продължава контролното оттам, където е спрял(а). Излизанията се нулират, а ако времето е изтекло, получава още 5 минути. Да продължи ли?`)) return;
+      try { await api('t/exam/reset', { userId: Number(b.dataset.unlock), lessonId: L.id, mode: 'unlock' }); toast('Готово. Ученикът да отвори контролното наново.'); draw(); } catch (e) { toast(e.message); }
+    }));
+    $$('[data-restart]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm(`${b.dataset.name} започва контролното отначало. Отговорите му по задачите от контролното се ИЗТРИВАТ. Сигурна ли си?`)) return;
+      try { await api('t/exam/reset', { userId: Number(b.dataset.restart), lessonId: L.id, mode: 'restart' }); toast('Изтрито. Ученикът може да започне отначало.'); draw(); } catch (e) { toast(e.message); }
+    }));
+  };
+  await load();
+  const d0 = await api('t/exams?lesson=' + L.id);
+  view.innerHTML = `<h1>Контролно</h1>
+    ${EXAM_LESSONS.length > 1 ? `<p>${EXAM_LESSONS.map((x) => `<a class="btn small ${x.id === L.id ? 'primary' : ''}" href="#/exam/${x.id}">${esc(x.title)}</a>`).join(' ')}</p>` : ''}
+    <div class="cards2"><div class="box"><h2>${esc(L.title)}</h2>
+      <p>${d0.closed ? '<b style="color:var(--bad)">Урокът е заключен</b>, учениците не могат да започнат. Отвори го от <a href="#/lessons">Уроци</a>, когато започне часът.' : '<b style="color:var(--ok)">Урокът е отворен</b>, учениците могат да започнат. Заключи го от <a href="#/lessons">Уроци</a> след часа.'}</p>
+      <p class="hint" style="margin-bottom:0">Контролното е на цял екран. Първото излизане (Esc, друг раздел, Alt+Tab) е предупреждение, второто го предава автоматично. Подсказките са изключени. Втори телефон или подсказване не се засичат.</p></div>
+    <div class="box"><h2>Време</h2><form id="exmin" class="row-flex" style="align-items:flex-end"><label class="field" style="margin:0">Минути за всеки ученик<input type="number" name="minutes" min="5" max="240" value="${d0.minutes}" style="max-width:120px"></label><button class="btn primary">Запази</button></form>
+      <p class="hint" style="margin-bottom:0">Времето тече от момента, в който ученикът натисне „Започни“. Промяната важи за тези, които още не са започнали.</p></div></div>
+    <h2 class="section-title">Ученици</h2>${classChips(() => showExam(L.id))}<div id="extable"></div>`;
+  $('#exmin').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { const r = await api('t/exam/minutes', { minutes: Number(new FormData(e.target).get('minutes')) }); toast(`Запазено: ${r.minutes} минути.`); } catch (ex) { toast(ex.message); }
+  });
+  await draw();
+  examTimer = setInterval(() => { draw().catch(() => {}); }, 10000);
+}
+
 
 async function showAccount() {
   view.innerHTML = `<h1>Профил</h1><div class="cards2"><div class="box"><h2>Смяна на паролата</h2><div id="pwmsg"></div>

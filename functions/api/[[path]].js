@@ -162,6 +162,11 @@ async function check({ env, user, body }) {
   if (!task) return fail('Няма такава задача.');
   const settings = await getSettings(env);
   if (user.role !== 'teacher' && settings.closed.includes(task.lesson)) return fail('Този урок още е заключен.');
+  if (user.role !== 'teacher' && EXAMS.has(task.lesson)) {
+    const ex = await examRow(env, user.id, task.lesson);
+    if (!ex) return fail('Първо започни контролното.');
+    if (ex.submitted_at || Date.now() > ex.ends_at + GRACE) return fail('Контролното е предадено. Отговорите вече не се приемат.');
+  }
   let result, answer;
   if (task.kind === 'choice') {
     const choice = Number(body.answer);
@@ -198,6 +203,7 @@ async function hint({ env, user, body }) {
   const taskId = String(body.taskId || '');
   const task = TASKS[taskId];
   if (!task || !task.hints) return fail('Няма подсказка за тази задача.');
+  if (EXAMS.has(task.lesson) && user.role !== 'teacher') return fail('На контролното няма подсказки.');
   const level = Math.min(2, Math.max(1, Number(body.level) || 1));
   const settings = await getSettings(env);
   if (user.role !== 'teacher' && settings.closed.includes(task.lesson)) return fail('Този урок още е заключен.');
@@ -414,6 +420,7 @@ async function teacherStudentDelete({ env, body }) {
     env.DB.prepare('DELETE FROM attempts WHERE user_id = ?').bind(id),
     env.DB.prepare('DELETE FROM progress WHERE user_id = ?').bind(id),
     env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM exams WHERE user_id = ?').bind(id),
     env.DB.prepare("DELETE FROM users WHERE id = ? AND role = 'student'").bind(id),
   ]);
   return json({ ok: true });
@@ -424,6 +431,7 @@ async function teacherResetProgress({ env, body }) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM attempts WHERE user_id = ?').bind(id),
     env.DB.prepare('DELETE FROM progress WHERE user_id = ?').bind(id),
+    env.DB.prepare('DELETE FROM exams WHERE user_id = ?').bind(id),
   ]);
   return json({ ok: true });
 }
@@ -439,6 +447,175 @@ async function teacherSettings({ env, body }) {
 }
 
 // =====================================================================
+// Контролно на цял екран
+// =====================================================================
+// Първото излизане от цял екран (Esc, друг раздел, Alt+Tab) е предупреждение,
+// второто предава контролното. Всичко се пази тук, затова презареждането не нулира брояча.
+const EXAMS = new Set(LESSONS.filter((l) => l.exam).map((l) => l.id));
+const MAX_EXITS = 2;      // второто излизане предава
+const GRACE = 60e3;       // минута толеранс за проверка, изпратена точно в края
+
+const examRow = (env, userId, lessonId) => env.DB.prepare('SELECT * FROM exams WHERE user_id = ? AND lesson_id = ?').bind(userId, lessonId).first();
+async function examFinalize(env, ex) {
+  // изтеклото време се отбелязва като предаване при следващото поискване
+  if (ex && !ex.submitted_at && Date.now() > ex.ends_at) {
+    await env.DB.prepare("UPDATE exams SET submitted_at = ?, reason = 'time' WHERE user_id = ? AND lesson_id = ? AND submitted_at IS NULL").bind(ex.ends_at, ex.user_id, ex.lesson_id).run();
+    ex.submitted_at = ex.ends_at; ex.reason = 'time';
+  }
+  return ex;
+}
+function examState(ex, minutes) {
+  if (!ex) return { state: 'none', minutes, now: Date.now(), maxExits: MAX_EXITS };
+  return { state: ex.submitted_at ? 'done' : 'active', startedAt: ex.started_at, endsAt: ex.ends_at, exits: ex.exits, out: !!ex.out_since, submittedAt: ex.submitted_at, reason: ex.reason, minutes, now: Date.now(), maxExits: MAX_EXITS };
+}
+async function examLesson(env, user, lessonId) {
+  if (!EXAMS.has(lessonId)) return [null, fail('Това не е контролно.')];
+  const settings = await getSettings(env);
+  if (user.role !== 'teacher' && settings.closed.includes(lessonId)) return [null, fail('Контролното още е заключено.')];
+  return [settings, null];
+}
+
+async function examGet({ env, user, url }) {
+  const lessonId = url.searchParams.get('lesson') || '';
+  const [settings, err] = await examLesson(env, user, lessonId);
+  if (err) return err;
+  const ex = await examFinalize(env, await examRow(env, user.id, lessonId));
+  return json(examState(ex, settings.examMinutes));
+}
+
+async function examStart({ env, user, body }) {
+  const lessonId = String(body.lessonId || '');
+  const [settings, err] = await examLesson(env, user, lessonId);
+  if (err) return err;
+  if (user.role === 'teacher') return fail('Учителят не може да започва контролно. Пробвай с ученически профил.');
+  let ex = await examFinalize(env, await examRow(env, user.id, lessonId));
+  if (!ex) {
+    const t = Date.now();
+    await env.DB.prepare('INSERT OR IGNORE INTO exams (user_id, lesson_id, started_at, ends_at, log) VALUES (?, ?, ?, ?, ?)')
+      .bind(user.id, lessonId, t, t + settings.examMinutes * 60e3, JSON.stringify([[t, 'start']])).run();
+    ex = await examRow(env, user.id, lessonId);
+  }
+  return json(examState(ex, settings.examMinutes));
+}
+
+const EXIT_KINDS = ['fullscreen', 'tab', 'blur', 'reload'];
+const pushLog = async (env, userId, lessonId, entry) => {
+  // дневникът е само за учителя; пазим последните 60 събития
+  const r = await examRow(env, userId, lessonId);
+  const log = JSON.parse((r && r.log) || '[]');
+  log.push(entry);
+  await env.DB.prepare('UPDATE exams SET log = ? WHERE user_id = ? AND lesson_id = ?').bind(JSON.stringify(log.slice(-60)), userId, lessonId).run();
+};
+
+// Броим само момента на излизане. Докато ученикът е навън (out_since), нови събития и
+// презареждане не се броят отново — броячът тръгва пак, когато се върне на цял екран.
+async function examExit({ env, user, body }) {
+  const lessonId = String(body.lessonId || '');
+  const [settings, err] = await examLesson(env, user, lessonId);
+  if (err) return err;
+  let ex = await examFinalize(env, await examRow(env, user.id, lessonId));
+  if (!ex || ex.submitted_at) return json(examState(ex, settings.examMinutes));
+  const kind = EXIT_KINDS.includes(body.kind) ? body.kind : 'blur';
+  const t = Date.now();
+  const r = await env.DB.prepare('UPDATE exams SET exits = exits + 1, last_exit = ?, out_since = ? WHERE user_id = ? AND lesson_id = ? AND out_since IS NULL AND submitted_at IS NULL')
+    .bind(t, t, user.id, lessonId).run();
+  if (r.meta.changes) {
+    await env.DB.prepare("UPDATE exams SET submitted_at = ?, reason = 'exits' WHERE user_id = ? AND lesson_id = ? AND exits >= ? AND submitted_at IS NULL")
+      .bind(t, user.id, lessonId, MAX_EXITS).run();
+    await pushLog(env, user.id, lessonId, [t, kind]);
+    ex = await examRow(env, user.id, lessonId);
+  }
+  return json(examState(ex, settings.examMinutes));
+}
+
+async function examBack({ env, user, body }) {
+  const lessonId = String(body.lessonId || '');
+  const [settings, err] = await examLesson(env, user, lessonId);
+  if (err) return err;
+  let ex = await examFinalize(env, await examRow(env, user.id, lessonId));
+  if (!ex || ex.submitted_at || !ex.out_since) return json(examState(ex, settings.examMinutes));
+  const t = Date.now();
+  const r = await env.DB.prepare('UPDATE exams SET out_since = NULL WHERE user_id = ? AND lesson_id = ? AND out_since IS NOT NULL').bind(user.id, lessonId).run();
+  if (r.meta.changes) await pushLog(env, user.id, lessonId, [t, 'back', Math.round((t - ex.out_since) / 1000)]);
+  ex = await examRow(env, user.id, lessonId);
+  return json(examState(ex, settings.examMinutes));
+}
+
+async function examFinish({ env, user, body }) {
+  const lessonId = String(body.lessonId || '');
+  const [settings, err] = await examLesson(env, user, lessonId);
+  if (err) return err;
+  const ex = await examFinalize(env, await examRow(env, user.id, lessonId));
+  if (!ex || ex.submitted_at) return json(examState(ex, settings.examMinutes));
+  const t = Date.now();
+  await env.DB.prepare("UPDATE exams SET submitted_at = ?, reason = 'manual' WHERE user_id = ? AND lesson_id = ? AND submitted_at IS NULL").bind(t, user.id, lessonId).run();
+  await pushLog(env, user.id, lessonId, [t, 'manual']);
+  return json(examState({ ...ex, submitted_at: t, reason: 'manual' }, settings.examMinutes));
+}
+
+// --- учителят
+async function teacherExams({ env, url }) {
+  const lessonId = url.searchParams.get('lesson') || [...EXAMS][0];
+  if (!EXAMS.has(lessonId)) return fail('Това не е контролно.');
+  const settings = await getSettings(env);
+  const tasks = LESSONS.find((l) => l.id === lessonId).tasks;
+  const marks = tasks.map(() => '?').join(',');
+  const [users, exams, prog] = await Promise.all([
+    env.DB.prepare("SELECT id, name, class, active FROM users WHERE role = 'student' ORDER BY class, name").all(),
+    env.DB.prepare('SELECT * FROM exams WHERE lesson_id = ?').bind(lessonId).all(),
+    env.DB.prepare(`SELECT user_id, task_id, solved, tries FROM progress WHERE task_id IN (${marks})`).bind(...tasks).all(),
+  ]);
+  const t = Date.now();
+  const exMap = {};
+  for (const e of exams.results) {
+    if (!e.submitted_at && t > e.ends_at) { e.submitted_at = e.ends_at; e.reason = 'time'; }
+    exMap[e.user_id] = { startedAt: e.started_at, endsAt: e.ends_at, exits: e.exits, out: !!e.out_since, submittedAt: e.submitted_at, reason: e.reason, log: JSON.parse(e.log || '[]') };
+  }
+  const pm = {};
+  for (const p of prog.results) (pm[p.user_id] ||= {})[p.task_id] = [p.solved, p.tries];
+  return json({
+    lessonId, minutes: settings.examMinutes, closed: settings.closed.includes(lessonId), now: t, maxExits: MAX_EXITS,
+    rows: users.results.map((u) => ({ ...u, exam: exMap[u.id] || null, tasks: pm[u.id] || {} })),
+  });
+}
+
+async function teacherExamReset({ env, body }) {
+  const userId = Number(body.userId);
+  const lessonId = String(body.lessonId || '');
+  if (!EXAMS.has(lessonId)) return fail('Това не е контролно.');
+  const ex = await examRow(env, userId, lessonId);
+  if (!ex) return fail('Ученикът още не е започвал.');
+  const t = Date.now();
+  if (body.mode === 'unlock') {
+    // продължава оттам, където е спрял: излизанията се нулират, а ако времето е изтекло, получава още 5 минути.
+    // Отбелязваме го като „навън“, за да не се брои презареждането, с което се връща.
+    await env.DB.prepare('UPDATE exams SET submitted_at = NULL, reason = NULL, exits = 0, last_exit = NULL, out_since = ?, ends_at = ? WHERE user_id = ? AND lesson_id = ?')
+      .bind(t, Math.max(ex.ends_at, t + 5 * 60e3), userId, lessonId).run();
+    await pushLog(env, userId, lessonId, [t, 'unlock']);
+    return json({ ok: true });
+  }
+  if (body.mode === 'restart') {
+    // започва отначало: изтриват се и отговорите му по задачите от контролното
+    const tasks = LESSONS.find((l) => l.id === lessonId).tasks;
+    const marks = tasks.map(() => '?').join(',');
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM exams WHERE user_id = ? AND lesson_id = ?').bind(userId, lessonId),
+      env.DB.prepare(`DELETE FROM progress WHERE user_id = ? AND task_id IN (${marks})`).bind(userId, ...tasks),
+      env.DB.prepare(`DELETE FROM attempts WHERE user_id = ? AND task_id IN (${marks})`).bind(userId, ...tasks),
+    ]);
+    return json({ ok: true });
+  }
+  return fail('Непознато действие.');
+}
+
+async function teacherExamMinutes({ env, body }) {
+  const m = Math.round(Number(body.minutes));
+  if (!(m >= 5 && m <= 240)) return fail('Времето трябва да е между 5 и 240 минути.');
+  await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('examMinutes', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").bind(String(m)).run();
+  return json({ ok: true, minutes: m });
+}
+
+// =====================================================================
 const ROUTES = {
   'GET status': [status, 'public'],
   'POST setup': [setup, 'public'],
@@ -451,6 +628,14 @@ const ROUTES = {
   'POST hint': [hint, 'user'],
   'GET leaderboard': [leaderboard, 'user'],
   'POST password': [changePassword, 'user'],
+  'GET exam': [examGet, 'user'],
+  'POST exam/start': [examStart, 'user'],
+  'POST exam/exit': [examExit, 'user'],
+  'POST exam/back': [examBack, 'user'],
+  'POST exam/finish': [examFinish, 'user'],
+  'GET t/exams': [teacherExams, 'teacher'],
+  'POST t/exam/reset': [teacherExamReset, 'teacher'],
+  'POST t/exam/minutes': [teacherExamMinutes, 'teacher'],
   'GET t/overview': [teacherOverview, 'teacher'],
   'GET t/activity': [teacherActivity, 'teacher'],
   'POST t/class': [teacherClassCreate, 'teacher'],

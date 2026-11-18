@@ -19,6 +19,8 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_attempts_time ON attempts(id)`,
   `CREATE TABLE IF NOT EXISTS progress (user_id INTEGER NOT NULL, task_id TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, last_answer TEXT, solved_answer TEXT, first_solved_at TEXT, updated_at TEXT, hints INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, task_id))`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
+  // контролно: един ред на ученик за урок; времената са в милисекунди
+  `CREATE TABLE IF NOT EXISTS exams (user_id INTEGER NOT NULL, lesson_id TEXT NOT NULL, started_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, exits INTEGER NOT NULL DEFAULT 0, last_exit INTEGER, submitted_at INTEGER, reason TEXT, out_since INTEGER, log TEXT, PRIMARY KEY (user_id, lesson_id))`,
 ];
 let schemaReady = null;
 export function ensureSchema(env) {
@@ -82,6 +84,7 @@ export async function getSettings(env) {
     closed: s.closed ? JSON.parse(s.closed) : [],
     leaderboard: s.leaderboard !== '0',
     showExpected: s.showExpected !== '0',
+    examMinutes: Math.min(240, Math.max(5, Number(s.examMinutes) || 40)),
   };
 }
 

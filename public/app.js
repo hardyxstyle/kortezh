@@ -47,6 +47,11 @@ async function boot() {
   $('#who').textContent = `${ME.name}${ME.class ? ', ' + ME.class : ''}`;
   if (ME.role === 'teacher') $('#tlink').classList.remove('hidden');
   checkNewBadges();
+  // ако има започнато контролно, връщаме ученика направо в него (и в нов раздел)
+  const exL = ME.role !== 'teacher' && K.lessons.find((L) => L.exam && !isClosed(L));
+  if (exL) {
+    try { const d = await api('exam?lesson=' + exL.id); if (d.state === 'active') { setExam(d, exL.id); EX.fresh = true; } } catch { /* нищо */ }
+  }
   route();
 }
 
@@ -54,6 +59,8 @@ function route() {
   if (!ME) return;
   const parts = location.hash.replace(/^#\/?/, '').split('/');
   const [a, b, c, d] = parts;
+  // по време на контролното не се излиза към други страници на сайта
+  if (examActive() && !(a === 'l' && b === EX.lessonId)) { location.replace(`#/l/${EX.lessonId}/zadachi`); return; }
   $$('[data-nav]').forEach((x) => x.classList.toggle('active', x.dataset.nav === (a || 'home') || (a === 'l' && x.dataset.nav === 'home')));
   if (a === 'l' && lessonById(b)) return showLesson(lessonById(b), c || 'teoria', d);
   window.scrollTo(0, 0);
@@ -136,12 +143,13 @@ function showLesson(L, stepId, sub) {
     view.innerHTML = `<div class="col"><div class="msg info">Урок ${L.num} още не е отворен. Учителката ще го отключи, когато стигнете до него.</div><a class="btn" href="#/">Към уроците</a></div>`;
     return;
   }
+  if (L.exam && ME.role !== 'teacher') return showExam(L, sub);
   const step = STEPS.find((s) => s.id === stepId) || STEPS[0];
   const sameLesson = view.dataset.lesson === L.id && view.dataset.step === step.id;
   view.dataset.lesson = L.id; view.dataset.step = step.id;
   if (!sameLesson) window.scrollTo(0, 0);
   view.style.setProperty('--accent', lessonColor(L.id));
-  view.innerHTML = `<div class="col">${teacherBanner()}
+  view.innerHTML = `<div class="col">${teacherBanner()}${L.exam && ME.role === 'teacher' ? '<div class="msg info">Учениците решават този урок като контролно: на цял екран, с ограничено време и без подсказки. Второто излизане го предава. Следиш ги от „Контролно“ в учителския панел.</div>' : ''}
     <article class="card">
       <header class="lhead">
         <p class="sub"><a href="#/">Уроци</a> / Урок ${L.num}${L.book ? `, в учебника — урок ${L.book}` : ''}</p>
@@ -277,6 +285,7 @@ const firstUnsolved = (list) => { const k = list.findIndex((t) => !PROG[t.id]?.s
 // --- 4. Задачи (една по една)
 function stepTasks(L, body, sub) {
   const list = sqlTasks(L);
+  const exam = L.exam && ME.role !== 'teacher';
   if (!list.length) { body.innerHTML = `<p>Няма задачи.</p>${stepNav(L, 'test', 'tetradka')}`; return; }
   const i = Math.min(Math.max((Number(sub) || firstUnsolved(list) + 1) - 1, 0), list.length - 1);
   const t = list[i];
@@ -289,8 +298,8 @@ function stepTasks(L, body, sub) {
     <div class="tools">
       <button class="btn small line" data-tg="schema">Таблиците (${esc(dbTitle)})</button>
       ${t.expected && SHOW_EXP ? '<button class="btn small line" data-tg="expected">Очакван резултат</button>' : ''}
-      <button class="btn small line" id="h1">${p?.h >= 1 ? 'Подсказка 1 ✓' : 'Подсказка 1'}</button>
-      <button class="btn small line ${p?.h >= 1 ? '' : 'hidden'}" id="h2">${p?.h >= 2 ? 'Подсказка 2 ✓' : 'Подсказка 2'}</button>
+      <button class="btn small line ${exam ? 'hidden' : ''}" id="h1">${p?.h >= 1 ? 'Подсказка 1 ✓' : 'Подсказка 1'}</button>
+      <button class="btn small line ${p?.h >= 1 && !exam ? '' : 'hidden'}" id="h2">${p?.h >= 2 ? 'Подсказка 2 ✓' : 'Подсказка 2'}</button>
       ${p?.sa && p.sa !== p.a ? '<button class="btn small line" data-tg="solvedans">Вярното ми решение</button>' : ''}
     </div>
     <div class="panel hidden" data-p="schema">${schemaHtml(t.db)}</div>
@@ -306,7 +315,7 @@ function stepTasks(L, body, sub) {
       <button class="btn small ghost clear">Изчисти</button>
     </div>
     <div class="out" aria-live="polite"></div>
-    <div class="task-nav">${i > 0 ? `<a class="btn" href="#/l/${L.id}/zadachi/${i}">◀ Предишна</a>` : `<a class="btn" href="#/l/${L.id}/test">◀ Тест</a>`}${i < list.length - 1 ? `<a class="btn ${p?.s ? 'accent' : ''}" href="#/l/${L.id}/zadachi/${i + 2}" id="nx">Следваща ▶</a>` : `<a class="btn accent" href="#/l/${L.id}/tetradka">За тетрадката ▶</a>`}</div>`;
+    <div class="task-nav">${i > 0 ? `<a class="btn" href="#/l/${L.id}/zadachi/${i}">◀ Предишна</a>` : exam ? '<span></span>' : `<a class="btn" href="#/l/${L.id}/test">◀ Тест</a>`}${i < list.length - 1 ? `<a class="btn ${p?.s ? 'accent' : ''}" href="#/l/${L.id}/zadachi/${i + 2}" id="nx">Следваща ▶</a>` : exam ? '<span></span>' : `<a class="btn accent" href="#/l/${L.id}/tetradka">За тетрадката ▶</a>`}</div>`;
   $$('[data-tg]', body).forEach((b) => b.addEventListener('click', () => {
     const panel = $(`[data-p="${b.dataset.tg}"]`, body);
     panel.classList.toggle('hidden');
@@ -351,6 +360,7 @@ function stepTasks(L, body, sub) {
       if (v.ok && $('#nx')) { $('#nx').classList.add('accent'); $('#nx').focus(); }
     } catch (e) {
       out.innerHTML = `<div class="msg bad">${esc(e.message)}</div>`;
+      if (exam && /предадено/.test(e.message)) refreshExam(L);
     } finally { btn.disabled = false; }
   });
 }
@@ -367,6 +377,183 @@ function stepNotebook(L, body) {
     <h3>Твоят резултат</h3>
     <div class="row-flex">${lb ? `<span class="badge ${lb.got ? '' : 'off'}" style="padding:0">${medal(lb)}</span>` : ''}<div>Решени <b>${c.solved} от ${c.main}</b> основни задачи${c.bonus ? `, бонус <b>${c.bonusSolved} от ${c.bonus}</b>` : ''}.<br><span class="hint">${lb?.got ? 'Значката за урока е твоя!' : 'Реши всички основни задачи, за да вземеш значката на урока.'}</span></div></div>
     <div class="steps-nav"><a class="btn" href="#/l/${L.id}/zadachi">◀ Задачи</a><button class="btn" onclick="window.print()">Принтирай</button>${nextL && !isClosed(nextL) ? `<a class="btn accent" href="#/l/${nextL.id}/teoria">Урок ${nextL.num}: ${esc(nextL.title)} ▶</a>` : '<a class="btn accent" href="#/">Към уроците</a>'}</div>`;
+}
+
+// ---------------------------------------------------------------
+// Контролно на цял екран. Първото излизане (Esc, друг раздел, Alt+Tab, друга програма)
+// е предупреждение, второто предава. Броенето и времето се пазят на сървъра.
+let EX = null;                 // състоянието от сървъра + lessonId и разликата в часовниците
+let exTick = null, exLast = 0, exHooked = false;
+const examActive = () => !!EX && EX.state === 'active';
+const fsOk = () => !!(document.fullscreenEnabled && document.documentElement.requestFullscreen);
+const inFs = () => !!document.fullscreenElement;
+const EX_REASON = { manual: 'Предаде го сам(а).', exits: 'Предадено автоматично: излезе от цял екран втори път.', time: 'Предадено автоматично: времето изтече.' };
+
+function setExam(d, lessonId) {
+  EX = { ...d, lessonId, skew: d.now - Date.now() };
+  document.body.classList.toggle('exam-on', examActive());
+  clearInterval(exTick); exTick = null;
+  if (examActive()) { hookExam(); exTick = setInterval(examBar, 1000); }
+}
+
+async function examPost(path, data) {
+  // keepalive: заявката стига до сървъра, дори ако страницата се затваря в момента
+  const r = await fetch('/api/' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data), keepalive: true });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || `Грешка ${r.status}`);
+  return d;
+}
+
+async function showExam(L, sub) {
+  view.dataset.lesson = ''; view.dataset.step = '';
+  view.style.setProperty('--accent', lessonColor(L.id));
+  if (!EX || EX.lessonId !== L.id) {
+    view.innerHTML = '<p class="empty">Зареждане…</p>';
+    try { setExam(await api('exam?lesson=' + L.id), L.id); }
+    catch (e) { view.innerHTML = `<div class="col"><div class="msg bad">${esc(e.message)}</div><a class="btn" href="#/">Към уроците</a></div>`; return; }
+    if (examActive()) EX.fresh = true;
+  }
+  if (EX.state === 'none') return examIntro(L);
+  if (EX.state === 'done') return examDone(L);
+  renderExam(L, sub);
+  // страницата е отворена наново по време на контролното — значи е излизал(а)
+  if (EX.fresh) { EX.fresh = false; return examExit('reload'); }
+  if (fsOk() && !inFs()) examCover();
+}
+
+function examIntro(L) {
+  window.scrollTo(0, 0);
+  view.innerHTML = `<div class="col"><article class="card">
+    <header class="lhead"><p class="sub"><a href="#/">Уроци</a> / Урок ${L.num}</p><h1>${esc(L.title)}</h1></header>
+    <div class="lbody"><div class="theory">${L.theory}</div>
+      <div class="exam-rules"><h3>Преди да започнеш</h3><ul>
+        <li>Имаш <b>${EX.minutes} минути</b> от натискането на бутона. Часовникът не спира, ако затвориш страницата.</li>
+        <li>Контролното се отваря <b>на цял екран</b>. Не излизай от него: нито с Esc, нито с друг раздел, нито с Alt+Tab.</li>
+        <li>Първото излизане е <b>предупреждение</b>. При второто контролното се <b>предава автоматично</b>.</li>
+        <li>Когато свършиш, натисни <b>„Предай“</b> горе вдясно.</li>
+      </ul></div>
+      ${fsOk() ? '' : '<div class="msg info">Този браузър не може да отвори цял екран (например iPhone). Контролното пак следи дали излизаш от страницата.</div>'}
+      <div class="steps-nav"><a class="btn" href="#/">◀ Към уроците</a><button class="btn accent" id="exstart">Започни контролното</button></div>
+    </div></article></div>`;
+  $('#exstart').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { if (fsOk()) await document.documentElement.requestFullscreen(); } catch { /* ще покажем бутона за връщане */ }
+    try { setExam(await api('exam/start', { lessonId: L.id }), L.id); }
+    catch (ex) { toast(ex.message, 4000); e.target.disabled = false; if (inFs()) document.exitFullscreen().catch(() => {}); return; }
+    if (EX.state === 'done') return examDone(L);
+    const to = `#/l/${L.id}/zadachi/1`;
+    if (location.hash === to) renderExam(L, 1); else location.hash = to;
+  });
+}
+
+function renderExam(L, sub) {
+  const keep = view.dataset.exam === L.id && $('#lbody');
+  if (!keep) {
+    window.scrollTo(0, 0);
+    view.innerHTML = `<div class="col"><article class="card">
+      <header class="lhead exam-head">
+        <div><p class="sub">Контролно</p><h1>${esc(L.title)}</h1></div>
+        <div class="exam-bar"><span class="exam-warn" id="exwarn"></span><span class="exam-time" id="extime" aria-live="off">--:--</span>
+          <button class="btn small" id="exfin">Предай</button></div>
+      </header><div class="lbody" id="lbody"></div></article></div>`;
+    view.dataset.exam = L.id;
+    const fin = $('#exfin');
+    let armed = null;
+    fin.addEventListener('click', async () => {
+      // без confirm(): прозорецът за потвърждение изкарва браузъра от цял екран
+      if (!armed) { fin.textContent = 'Сигурен(а) ли си? Натисни пак'; fin.classList.add('accent'); armed = setTimeout(() => { armed = null; fin.textContent = 'Предай'; fin.classList.remove('accent'); }, 4000); return; }
+      clearTimeout(armed); fin.disabled = true;
+      try { setExam(await examPost('exam/finish', { lessonId: L.id }), L.id); examDone(L); }
+      catch (e) { toast(e.message); fin.disabled = false; }
+    });
+  }
+  stepTasks(L, $('#lbody'), sub);
+  examBar();
+}
+
+function examBar() {
+  if (!examActive()) return;
+  const left = Math.max(0, EX.endsAt - (Date.now() + EX.skew));
+  const t = $('#extime');
+  if (t) {
+    const m = Math.floor(left / 60000), sec = Math.floor((left % 60000) / 1000);
+    t.textContent = `${m}:${String(sec).padStart(2, '0')}`;
+    t.classList.toggle('low', left < 5 * 60000);
+  }
+  const w = $('#exwarn');
+  if (w) w.textContent = EX.exits ? `Предупреждение ${EX.exits} от ${EX.maxExits - 1}` : '';
+  if (left <= 0) examTimeUp();
+}
+async function examTimeUp() {
+  clearInterval(exTick); exTick = null;
+  const L = lessonById(EX.lessonId);
+  try { setExam(await examPost('exam/finish', { lessonId: L.id }), L.id); } catch { EX.state = 'done'; EX.reason = 'time'; setExam(EX, L.id); }
+  examDone(L);
+}
+async function refreshExam(L) {
+  try { setExam(await api('exam?lesson=' + L.id), L.id); if (EX.state === 'done') examDone(L); } catch { /* нищо */ }
+}
+
+function hookExam() {
+  if (exHooked) return;
+  exHooked = true;
+  document.addEventListener('fullscreenchange', () => { if (examActive() && fsOk() && !inFs()) examExit('fullscreen'); });
+  document.addEventListener('visibilitychange', () => { if (examActive() && document.hidden) examExit('tab'); });
+  window.addEventListener('blur', () => { if (examActive()) examExit('blur'); });
+}
+
+async function examExit(kind) {
+  if (!examActive()) return;
+  if (kind !== 'reload' && Date.now() - exLast < 1500) return; // Esc и смяната на прозореца идват заедно
+  exLast = Date.now();
+  examCover('wait');
+  try {
+    setExam(await examPost('exam/exit', { lessonId: EX.lessonId, kind }), EX.lessonId);
+  } catch (e) { examCover('offline'); return; }
+  if (EX.state === 'done') return examDone(lessonById(EX.lessonId));
+  examBar();
+  examCover();
+}
+
+function examCover(mode) {
+  let c = $('#excover');
+  if (!c) { c = document.createElement('div'); c.id = 'excover'; c.className = 'exam-cover'; c.setAttribute('role', 'alertdialog'); document.body.appendChild(c); }
+  const left = EX.maxExits - EX.exits;
+  let h, p;
+  if (mode === 'wait') { h = 'Излезе от контролното'; p = 'Записвам…'; }
+  else if (mode === 'offline') { h = 'Излезе от контролното'; p = 'Няма връзка със сървъра. Върни се и провери интернета.'; }
+  else if (EX.exits) { h = 'Излезе от контролното'; p = `Това е <b>предупреждение</b>. При още ${left === 1 ? 'едно излизане' : left + ' излизания'} контролното се предава автоматично. Учителят вижда кога и за колко време си излизал(а).`; }
+  else { h = 'Контролното продължава'; p = 'Натисни бутона, за да продължиш на цял екран.'; }
+  c.innerHTML = `<div class="card exam-cover-box"><h2>${h}</h2><p>${p}</p><button class="btn accent" id="exback" ${mode === 'wait' ? 'disabled' : ''}>${fsOk() ? 'Върни се на цял екран' : 'Продължи'}</button></div>`;
+  $('#exback').addEventListener('click', examBack);
+}
+async function examBack() {
+  try { if (fsOk() && !inFs()) await document.documentElement.requestFullscreen(); } catch { /* браузърът отказа */ }
+  if (fsOk() && !inFs()) return;
+  $('#excover')?.remove();
+  if (!examActive()) return;
+  try { setExam(await examPost('exam/back', { lessonId: EX.lessonId }), EX.lessonId); } catch { /* ще се отбележи при следващата заявка */ }
+  if (EX.state === 'done') examDone(lessonById(EX.lessonId));
+}
+
+function examDone(L) {
+  $('#excover')?.remove();
+  document.body.classList.remove('exam-on');
+  view.dataset.exam = '';
+  if (inFs()) document.exitFullscreen().catch(() => {});
+  const list = sqlTasks(L);
+  const solved = list.filter(ok).length;
+  const at = EX.submittedAt ? new Date(EX.submittedAt).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' }) : '';
+  window.scrollTo(0, 0);
+  view.innerHTML = `<div class="col"><article class="card">
+    <header class="lhead"><p class="sub"><a href="#/">Уроци</a> / Урок ${L.num}</p><h1>${esc(L.title)}</h1></header>
+    <div class="lbody">
+      <div class="msg ${EX.reason === 'exits' ? 'bad' : 'ok'}"><b>Контролното е предадено${at ? ' в ' + at : ''}.</b> ${EX_REASON[EX.reason] || ''}</div>
+      <p>Решени задачи: <b>${solved} от ${list.length}</b>${EX.exits ? `, излизания: <b>${EX.exits}</b>` : ''}.</p>
+      <div class="exam-list">${list.map((t) => `<span class="${PROG[t.id]?.s ? 'ok' : PROG[t.id]?.t ? 'bad' : ''}">${PROG[t.id]?.s ? '✓' : PROG[t.id]?.t ? '✗' : '—'} ${esc(t.title)}</span>`).join('')}</div>
+      <p class="hint">Отговорите ти вече не могат да се променят. Ако е станала грешка (спрял ток, паднал интернет), кажи на учителката — тя може да ти разреши да продължиш.</p>
+      <div class="steps-nav"><span></span><a class="btn accent" href="#/">Към уроците</a></div>
+    </div></article></div>`;
 }
 
 // ---------------------------------------------------------------

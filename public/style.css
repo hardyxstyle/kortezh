@@ -395,3 +395,23 @@ details.att summary { cursor: pointer; font-size: .9rem; }
   body { background: #fff; }
   .card { box-shadow: none; border: 0; }
 }
+
+/* ---------- контролно на цял екран ---------- */
+body.exam-on .topbar nav { display: none; }
+body.exam-on .topbar .brand { pointer-events: none; }
+.exam-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+.exam-bar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.exam-time { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.5rem; padding: .15rem .6rem; border: 1.5px solid var(--rule); border-radius: var(--radius-s); min-width: 5.5ch; text-align: center; }
+.exam-time.low { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+.exam-warn { color: var(--bad); font-weight: 600; font-size: .95rem; }
+.exam-warn:empty { display: none; }
+.exam-rules { border: 1.5px solid var(--accent); border-radius: var(--radius-s); padding: .4rem 1.2rem .8rem; margin: 1.2rem 0; }
+.exam-rules li { margin: .35rem 0; }
+.exam-cover { position: fixed; inset: 0; z-index: 1000; background: rgba(12, 16, 30, .82); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.exam-cover-box { max-width: 520px; padding: 1.6rem 1.8rem; text-align: center; }
+.exam-cover-box h2 { margin-top: 0; color: var(--bad); }
+.exam-list { display: flex; flex-direction: column; gap: .3rem; margin: 1rem 0; }
+.exam-list span.ok { color: var(--ok); }
+.exam-list span.bad { color: var(--bad); }
+.exam-log { font-size: .85rem; color: var(--ink-2); text-align: left; font-family: inherit; margin-top: .2rem; }
+.exam-log summary { cursor: pointer; }

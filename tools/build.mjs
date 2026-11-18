@@ -132,7 +132,7 @@ const publicLessons = [];
 const ids = new Set();
 
 for (const L of LESSONS) {
-  const pl = { id: L.id, num: L.num, book: L.book, title: L.title, prog: PROGRAM[L.id] || '', theory: L.theory.trim(), notebook: NOTEBOOK[L.id] || [], viz: VIZ[L.id] || [], tasks: [] };
+  const pl = { id: L.id, num: L.num, book: L.book, title: L.title, prog: PROGRAM[L.id] || '', theory: L.theory.trim(), notebook: NOTEBOOK[L.id] || [], viz: VIZ[L.id] || [], exam: !!L.exam, tasks: [] };
   for (const t of L.tasks) {
     if (ids.has(t.id)) err(`повторен id ${t.id}`);
     ids.add(t.id);
@@ -175,7 +175,7 @@ for (const L of LESSONS) {
 }
 
 const dbSeeds = Object.fromEntries(Object.entries(DATABASES).map(([k, v]) => [k, { seed: v.seed.trim(), variant: (v.variant || '').trim() }]));
-const lessonMeta = LESSONS.map((L) => ({ id: L.id, num: L.num, book: L.book, title: L.title, tasks: L.tasks.map((t) => t.id), main: L.tasks.filter((t) => !t.bonus).map((t) => t.id) }));
+const lessonMeta = LESSONS.map((L) => ({ id: L.id, num: L.num, book: L.book, title: L.title, exam: !!L.exam, tasks: L.tasks.map((t) => t.id), main: L.tasks.filter((t) => !t.bonus).map((t) => t.id) }));
 
 const header = '// АВТОМАТИЧНО ГЕНЕРИРАН ФАЙЛ — не редактирай на ръка. Източник: content/*.mjs, команда: node tools/build.mjs\n';
 writeFileSync(path.join(root, 'functions/_lib/content.js'),
