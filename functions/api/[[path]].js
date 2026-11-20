@@ -1,7 +1,7 @@
 // Кортеж — API. Всички заявки към /api/* минават оттук.
 import { json, fail, ensureSchema, hashPassword, safeEqual, randomHex, createSession, clearCookie, currentUser, getSettings, dbFactory, readJson } from '../_lib/server.js';
 import { gradeSql } from '../_lib/engine.js';
-import { ipOf, uaOf, noteUserIp, bump, watch } from '../_lib/watch.js';
+import { ipOf, uaOf, netOf, noteUserIp, bump, watch } from '../_lib/watch.js';
 import { TASKS, LESSONS } from '../_lib/content.js';
 
 const USERNAME_RE = /^[\p{L}\p{N}._-]{3,30}$/u;
@@ -20,9 +20,9 @@ export async function onRequest(context) {
   const method = request.method;
   try {
     const user = await currentUser(env, request);
-    const ip = ipOf(request), ua = uaOf(request);
-    if (user) noteUserIp(context, env, user.id, ip, ua);
-    watch(context, env, { ip, ua, user, path: `${method} /api/${path}`.slice(0, 120) });
+    const ip = ipOf(request), ua = uaOf(request), net = netOf(request);
+    if (user) noteUserIp(context, env, user.id, ip, ua, net);
+    watch(context, env, { ip, ua, net, user, path: `${method} /api/${path}`.slice(0, 120) });
     const route = ROUTES[`${method} ${path}`] || matchDynamic(method, path);
     if (!route) return fail('Няма такъв адрес.', 404);
     const [handler, access, extra] = route;
@@ -111,7 +111,7 @@ async function login({ env, body, request, ctx }) {
   const uname = String(body.username || '').trim().toLowerCase();
   const kIp = 'ip:' + ip, kUser = 'u:' + ip + ':' + uname;
   if (tooMany(kIp, 200) || tooMany(kUser, 10)) {
-    bump(ctx, env, { kind: 'login', ip, ua: uaOf(request), sample: uname.slice(0, 60) });
+    bump(ctx, env, { kind: 'login', ip, ua: uaOf(request), net: netOf(request), sample: uname.slice(0, 60) });
     return fail('Твърде много грешни опити. Опитай пак след 15 минути.', 429);
   }
   const bad = () => { addFail(kIp); addFail(kUser); return fail('Грешно потребителско име или парола.'); };
@@ -121,7 +121,7 @@ async function login({ env, body, request, ctx }) {
   if (!u || !safeEqual(h, u.pass)) return bad();
   if (!u.active) return fail('Профилът ти е спрян. Попитай учителката.');
   const cookie = await createSession(env, u.id);
-  noteUserIp(ctx, env, u.id, ip, uaOf(request));
+  noteUserIp(ctx, env, u.id, ip, uaOf(request), netOf(request));
   return json({ ok: true, role: u.role }, 200, { 'set-cookie': cookie });
 }
 
@@ -347,13 +347,15 @@ async function teacherStudentCreate({ env, body }) {
 }
 
 async function teacherSecurity({ env }) {
-  const events = (await env.DB.prepare(`SELECT e.ip, e.kind, e.day, e.hits, e.first_at, e.last_at, e.ua, e.sample, e.user_id, u.name, u.class, u.username
+  const events = (await env.DB.prepare(`SELECT e.ip, e.kind, e.day, e.hits, e.first_at, e.last_at, e.ua, e.net, e.sample, e.user_id, u.name, u.class, u.username
       FROM security_events e LEFT JOIN users u ON u.id = e.user_id
       WHERE e.day >= date('now', '-30 days') ORDER BY e.last_at DESC LIMIT 90`).all()).results;
-  const ips = [...new Set(events.map((e) => e.ip))];
-  const seen = ips.length ? (await env.DB.prepare(`SELECT ui.ip, ui.ua, ui.first_at, ui.last_at, u.id, u.name, u.class, u.role
+  const ips = [...new Set(events.map((e) => e.ip))].slice(0, 45);
+  const nets = [...new Set(events.map((e) => e.net).filter(Boolean))].slice(0, 45);
+  const q = (list) => list.map(() => '?').join(',') || "''";
+  const seen = ips.length ? (await env.DB.prepare(`SELECT ui.ip, ui.ua, ui.net, ui.first_at, ui.last_at, u.id, u.name, u.class, u.role
       FROM user_ips ui JOIN users u ON u.id = ui.user_id
-      WHERE ui.ip IN (${ips.map(() => '?').join(',')}) ORDER BY ui.last_at DESC`).bind(...ips).all()).results : [];
+      WHERE ui.ip IN (${q(ips)}) OR ui.net IN (${q(nets)}) ORDER BY ui.last_at DESC LIMIT 500`).bind(...ips, ...nets).all()).results : [];
   return json({ events, seen });
 }
 

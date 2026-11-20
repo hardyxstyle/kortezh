@@ -32,6 +32,10 @@ export function ensureSchema(env) {
         // миграции за бази, създадени с по-стара версия
         const cols = (await env.DB.prepare("SELECT name FROM pragma_table_info('progress')").all()).results.map((r) => r.name);
         if (!cols.includes('hints')) await env.DB.prepare('ALTER TABLE progress ADD COLUMN hints INTEGER NOT NULL DEFAULT 0').run();
+        for (const t of ['user_ips', 'security_events']) {
+          const c = (await env.DB.prepare(`SELECT name FROM pragma_table_info('${t}')`).all()).results.map((r) => r.name);
+          if (!c.includes('net')) await env.DB.prepare(`ALTER TABLE ${t} ADD COLUMN net TEXT`).run();
+        }
       })
       .catch((e) => { schemaReady = null; throw e; });
   }

@@ -226,12 +226,19 @@ function device(ua) {
 }
 async function showSecurity() {
   const d = await api('t/security');
-  const byIp = {};
-  d.seen.forEach((r) => { (byIp[r.ip] ||= []).push(r); });
+  const byIp = {}, byNet = {};
+  d.seen.forEach((r) => { (byIp[r.ip] ||= []).push(r); if (r.net) (byNet[r.net] ||= []).push(r); });
+  // VPN / хостинг мрежи: малко ученици ползват една и съща, затова съвпадението там е силна следа
+  const hosting = (net) => /host|server|cloud|vpn|data ?cent|nforce|m247|ovh|hetzner|digitalocean|amazon|google|microsoft|linode|akamai|vultr|leaseweb|datacamp|choopa|contabo|proton|nord|mullvad|surfshark|express|private internet|\btor\b/i.test(net || '');
   const who = (e) => {
     if (e.user_id && e.name) return `<a href="#/s/${e.user_id}"><b>${esc(e.name)}</b></a> <span class="hint">${esc(e.class || '')} · влязъл в профила си</span>`;
     const list = byIp[e.ip] || [];
-    if (!list.length) return '<span class="hint">От този адрес не е влизал никой.</span>';
+    if (!list.length) {
+      const nl = hosting(e.net) ? [...new Map((byNet[e.net] || []).map((r) => [r.id, r])).values()] : [];
+      if (!nl.length) return '<span class="hint">От този адрес не е влизал никой.</span>';
+      return nl.slice(0, 6).map((r) => `<div><a href="#/s/${r.id}"><b>${esc(r.name)}</b></a> <span class="hint">${esc(r.class || '')} · последно ${when(r.last_at)}</span></div>`).join('')
+        + `<div class="hint">Не от същия адрес, но от същата VPN/хостинг мрежа (${esc(e.net)}).${nl.some((r) => e.ua && r.ua === e.ua) ? ' Устройството съвпада.' : ''}</div>`;
+    }
     const same = list.filter((r) => e.ua && r.ua === e.ua);
     const shown = (same.length ? same : list).slice(0, 6);
     const note = list.length > 6 ? `<div class="hint">От този адрес са влизали ${list.length} души — вероятно училищната мрежа.${same.length ? ' Показани са тези със същото устройство.' : ''}</div>`
@@ -244,7 +251,7 @@ async function showSecurity() {
     ${d.events.map((e) => `<tr><td>${when(e.last_at)}<div class="hint">от ${when(e.first_at)}</div></td>
       <td><b>${esc(KIND[e.kind] || e.kind)}</b>${e.sample ? `<div class="hint mono">${esc(e.sample)}</div>` : ''}</td>
       <td>${e.hits}</td>
-      <td class="mono">${esc(e.ip)}<div class="hint" style="font-family:inherit">${device(e.ua)}</div></td>
+      <td class="mono">${esc(e.ip)}<div class="hint" style="font-family:inherit">${device(e.ua)}</div>${e.net ? `<div class="hint" style="font-family:inherit">${hosting(e.net) ? '<b style="color:var(--bad)">VPN/хостинг:</b> ' : ''}${esc(e.net)}</div>` : ''}</td>
       <td>${who(e)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="box"><p class="empty">Няма подозрителна активност за последните 30 дни.</p></div>'}`;
   $('#refresh').addEventListener('click', showSecurity);
 }

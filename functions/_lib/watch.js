@@ -7,20 +7,25 @@ const LIMIT = { anon: 120, user: 150 };
 
 export const ipOf = (request) => request.headers.get('cf-connecting-ip') || 'local';
 export const uaOf = (request) => String(request.headers.get('user-agent') || '').slice(0, 200);
+// мрежата (доставчик / VPN / хостинг), от която идва заявката — Cloudflare я дава в request.cf
+export const netOf = (request) => {
+  const cf = request.cf || {};
+  return cf.asn ? `${cf.asOrganization || 'AS' + cf.asn} (AS${cf.asn}, ${cf.country || '?'})`.slice(0, 120) : null;
+};
 
 const run = (ctx, p) => { const q = p.catch(() => {}); if (ctx && ctx.waitUntil) ctx.waitUntil(q); };
 
 // Кой профил от кой IP е влизал (записва се най-много веднъж на час за двойка профил + IP).
 const seen = new Map();
-export function noteUserIp(ctx, env, userId, ip, ua) {
+export function noteUserIp(ctx, env, userId, ip, ua, net = null) {
   const k = userId + '|' + ip;
   const t = Date.now();
   if (t - (seen.get(k) || 0) < 3600e3) return;
   if (seen.size > 5000) seen.clear();
   seen.set(k, t);
   const n = stamp();
-  run(ctx, env.DB.prepare(`INSERT INTO user_ips (user_id, ip, ua, first_at, last_at, hits) VALUES (?, ?, ?, ?, ?, 1)
-    ON CONFLICT (user_id, ip) DO UPDATE SET ua = excluded.ua, last_at = excluded.last_at, hits = hits + 1`).bind(userId, ip, ua, n, n).run());
+  run(ctx, env.DB.prepare(`INSERT INTO user_ips (user_id, ip, ua, net, first_at, last_at, hits) VALUES (?, ?, ?, ?, ?, ?, 1)
+    ON CONFLICT (user_id, ip) DO UPDATE SET ua = excluded.ua, net = excluded.net, last_at = excluded.last_at, hits = hits + 1`).bind(userId, ip, ua, net, n, n).run());
 }
 
 // Натрупва събития и ги записва най-много веднъж в минута.
@@ -40,9 +45,9 @@ export function bump(ctx, env, ev, add = 1) {
   const hits = p.hits;
   p.hits = 0;
   const n = stamp();
-  run(ctx, env.DB.prepare(`INSERT INTO security_events (ip, kind, day, user_id, hits, first_at, last_at, ua, sample) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (ip, kind, day, user_id) DO UPDATE SET hits = hits + excluded.hits, last_at = excluded.last_at, ua = excluded.ua, sample = COALESCE(excluded.sample, sample)`)
-    .bind(ev.ip, ev.kind, n.slice(0, 10), ev.userId || 0, hits, n, n, ev.ua || null, ev.sample || null).run());
+  run(ctx, env.DB.prepare(`INSERT INTO security_events (ip, kind, day, user_id, hits, first_at, last_at, ua, sample, net) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (ip, kind, day, user_id) DO UPDATE SET hits = hits + excluded.hits, last_at = excluded.last_at, ua = excluded.ua, sample = COALESCE(excluded.sample, sample), net = COALESCE(excluded.net, net)`)
+    .bind(ev.ip, ev.kind, n.slice(0, 10), ev.userId || 0, hits, n, n, ev.ua || null, ev.sample || null, ev.net || null).run());
   if (Math.random() < 0.05) {
     run(ctx, env.DB.batch([
       env.DB.prepare("DELETE FROM security_events WHERE day < date('now', '-90 days')"),
@@ -53,7 +58,7 @@ export function bump(ctx, env, ev, add = 1) {
 
 // Брои всяка заявка към /api/* по IP (без вход) или по профил (с вход).
 const counters = new Map();
-export function watch(ctx, env, { ip, ua, user, path }) {
+export function watch(ctx, env, { ip, ua, net, user, path }) {
   const kind = user ? 'user' : 'anon';
   const key = kind + ':' + (user ? user.id : ip);
   const t = Date.now();
@@ -66,5 +71,5 @@ export function watch(ctx, env, { ip, ua, user, path }) {
   c.n++;
   const lim = LIMIT[kind];
   if (c.n <= lim) return;
-  bump(ctx, env, { kind, ip, ua, userId: user ? user.id : 0, sample: path }, c.n === lim + 1 ? c.n : 1);
+  bump(ctx, env, { kind, ip, ua, net, userId: user ? user.id : 0, sample: path }, c.n === lim + 1 ? c.n : 1);
 }
