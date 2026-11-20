@@ -58,9 +58,7 @@
 <script type="module">
 import { api, $, $$ } from '/common.js';
 const go = (role) => location.replace(role === 'teacher' ? '/teacher.html' : '/app.html');
-api('me').then((d) => go(d.user.role)).catch(async () => {
-  try { const s = await api('status'); if (!s.hasTeacher) location.replace('/setup.html'); } catch { /* няма база */ }
-});
+api('me').then((d) => go(d.user.role)).catch(() => {});
 const err = $('#err');
 const showErr = (m) => { err.textContent = m; err.classList.toggle('hidden', !m); };
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => {

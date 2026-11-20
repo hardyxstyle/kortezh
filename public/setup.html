@@ -31,7 +31,8 @@
 <script type="module">
 import { api, $ } from '/common.js';
 const err = $('#err');
-api('status').then((s) => { if (s.hasTeacher) location.replace('/'); }).catch((e) => { err.textContent = e.message; err.classList.remove('hidden'); });
+// Първоначалната настройка е направена; /api/status и /api/setup са изключени в _routes.json.
+location.replace('/');
 $('#f').addEventListener('submit', async (e) => {
   e.preventDefault();
   try { await api('setup', Object.fromEntries(new FormData(e.target))); location.replace('/teacher.html'); }
