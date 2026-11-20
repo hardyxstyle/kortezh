@@ -218,8 +218,10 @@ const KIND = {
 };
 function device(ua) {
   if (!ua) return 'неизвестно';
-  const bot = ua.match(/python|curl|wget|node|axios|go-http|java|okhttp|postman|insomnia|httpx|aiohttp|powershell|libwww|scrapy|headless|bot/i);
-  if (bot) return `<b style="color:var(--bad)">скрипт (${esc(bot[0])})</b>`;
+  const bot = ua.match(/python|curl|wget|node|axios|go-http|java|okhttp|postman|insomnia|httpx|aiohttp|powershell|libwww|scrapy|headless|scan|check|crawl|bot/i);
+  if (bot) return `<b style="color:var(--bad)">скрипт (${esc(ua.split('/')[0].slice(0, 30))})</b>`;
+  // истинските браузъри винаги пращат „Mozilla/…“; всичко друго е собствен инструмент/скрипт
+  if (!/Mozilla\//.test(ua)) return `<b style="color:var(--bad)">скрипт (${esc(ua.split('/')[0].slice(0, 30))})</b>`;
   const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'браузър';
   const o = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
   return esc(o ? `${b}, ${o}` : b);
