@@ -19,6 +19,9 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_attempts_time ON attempts(id)`,
   `CREATE TABLE IF NOT EXISTS progress (user_id INTEGER NOT NULL, task_id TEXT NOT NULL, solved INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, last_answer TEXT, solved_answer TEXT, first_solved_at TEXT, updated_at TEXT, hints INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, task_id))`,
   `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
+  `CREATE TABLE IF NOT EXISTS user_ips (user_id INTEGER NOT NULL, ip TEXT NOT NULL, ua TEXT, first_at TEXT, last_at TEXT, hits INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, ip))`,
+  `CREATE INDEX IF NOT EXISTS idx_user_ips_ip ON user_ips(ip)`,
+  `CREATE TABLE IF NOT EXISTS security_events (ip TEXT NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, user_id INTEGER NOT NULL DEFAULT 0, hits INTEGER NOT NULL DEFAULT 0, first_at TEXT, last_at TEXT, ua TEXT, sample TEXT, PRIMARY KEY (ip, kind, day, user_id))`,
 ];
 let schemaReady = null;
 export function ensureSchema(env) {

@@ -50,6 +50,7 @@ async function route() {
     if (a === 'activity') return await showActivity();
     if (a === 'classes') return await showClasses();
     if (a === 'lessons') return await showLessons();
+    if (a === 'security') return await showSecurity();
     if (a === 'account') return showAccount();
     return await showOverview();
   } catch (e) {
@@ -206,6 +207,46 @@ async function showActivity() {
       <details><summary class="meta">какво е написал(а)</summary><div class="code-small">${esc(ans)}</div><div class="meta">${esc(a.message || '')}</div></details></div></li>`;
     }).join('')}</ul>` : '<p class="empty">Още няма опити.</p>'}</div>`;
   $('#refresh').addEventListener('click', showActivity);
+}
+
+// ---------------------------------------------------------------
+// Сигурност: кой праща подозрително много заявки и кои ученици са влизали от същия адрес.
+const KIND = {
+  anon: 'Много заявки без вход',
+  user: 'Много заявки от профил',
+  login: 'Налучкване на пароли',
+};
+function device(ua) {
+  if (!ua) return 'неизвестно';
+  const bot = ua.match(/python|curl|wget|node|axios|go-http|java|okhttp|postman|insomnia|httpx|aiohttp|powershell|libwww|scrapy|headless|bot/i);
+  if (bot) return `<b style="color:var(--bad)">скрипт (${esc(bot[0])})</b>`;
+  const b = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'браузър';
+  const o = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iPhone' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  return esc(o ? `${b}, ${o}` : b);
+}
+async function showSecurity() {
+  const d = await api('t/security');
+  const byIp = {};
+  d.seen.forEach((r) => { (byIp[r.ip] ||= []).push(r); });
+  const who = (e) => {
+    if (e.user_id && e.name) return `<a href="#/s/${e.user_id}"><b>${esc(e.name)}</b></a> <span class="hint">${esc(e.class || '')} · влязъл в профила си</span>`;
+    const list = byIp[e.ip] || [];
+    if (!list.length) return '<span class="hint">От този адрес не е влизал никой.</span>';
+    const same = list.filter((r) => e.ua && r.ua === e.ua);
+    const shown = (same.length ? same : list).slice(0, 6);
+    const note = list.length > 6 ? `<div class="hint">От този адрес са влизали ${list.length} души — вероятно училищната мрежа.${same.length ? ' Показани са тези със същото устройство.' : ''}</div>`
+      : same.length ? '<div class="hint">Със същото устройство.</div>' : '<div class="hint">От същия адрес (устройството е различно).</div>';
+    return shown.map((r) => `<div>${r.role === 'teacher' ? '' : `<a href="#/s/${r.id}">`}<b>${esc(r.name)}</b>${r.role === 'teacher' ? ' (учител)' : '</a>'} <span class="hint">${esc(r.class || '')} · последно ${when(r.last_at)}</span></div>`).join('') + note;
+  };
+  view.innerHTML = `<div class="row-flex" style="justify-content:space-between"><h1>Сигурност</h1><button class="btn small" id="refresh">Обнови</button></div>
+    <p class="hint">Тук се записва, когато от един адрес или профил дойдат подозрително много заявки (над 120 за 5 минути без вход, над 150 с вход), или някой налучква пароли. За всеки адрес се показва кои ученици са влизали от него. Записването е включено от 20.11.2026 — по-старите атаки не са записани.</p>
+    ${d.events.length ? `<div class="grid-wrap"><table class="grid"><thead><tr><th>Кога</th><th>Какво</th><th>Заявки</th><th>Адрес и устройство</th><th>Кой</th></tr></thead><tbody>
+    ${d.events.map((e) => `<tr><td>${when(e.last_at)}<div class="hint">от ${when(e.first_at)}</div></td>
+      <td><b>${esc(KIND[e.kind] || e.kind)}</b>${e.sample ? `<div class="hint mono">${esc(e.sample)}</div>` : ''}</td>
+      <td>${e.hits}</td>
+      <td class="mono">${esc(e.ip)}<div class="hint" style="font-family:inherit">${device(e.ua)}</div></td>
+      <td>${who(e)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="box"><p class="empty">Няма подозрителна активност за последните 30 дни.</p></div>'}`;
+  $('#refresh').addEventListener('click', showSecurity);
 }
 
 // ---------------------------------------------------------------

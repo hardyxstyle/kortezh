@@ -1,6 +1,7 @@
 // Кортеж — API. Всички заявки към /api/* минават оттук.
 import { json, fail, ensureSchema, hashPassword, safeEqual, randomHex, createSession, clearCookie, currentUser, getSettings, dbFactory, readJson } from '../_lib/server.js';
 import { gradeSql } from '../_lib/engine.js';
+import { ipOf, uaOf, noteUserIp, bump, watch } from '../_lib/watch.js';
 import { TASKS, LESSONS } from '../_lib/content.js';
 
 const USERNAME_RE = /^[\p{L}\p{N}._-]{3,30}$/u;
@@ -19,13 +20,16 @@ export async function onRequest(context) {
   const method = request.method;
   try {
     const user = await currentUser(env, request);
+    const ip = ipOf(request), ua = uaOf(request);
+    if (user) noteUserIp(context, env, user.id, ip, ua);
+    watch(context, env, { ip, ua, user, path: `${method} /api/${path}`.slice(0, 120) });
     const route = ROUTES[`${method} ${path}`] || matchDynamic(method, path);
     if (!route) return fail('Няма такъв адрес.', 404);
     const [handler, access, extra] = route;
     if (access === 'user' && !user) return fail('Трябва да влезеш в профила си.', 401);
     if (access === 'teacher' && (!user || user.role !== 'teacher')) return fail('Само за учителя.', 403);
     const body = method === 'POST' ? await readJson(request) : {};
-    return await handler({ env, request, user, body, url: new URL(request.url), extra });
+    return await handler({ env, request, user, body, url: new URL(request.url), extra, ctx: context });
   } catch (e) {
     return fail('Сървърна грешка: ' + (e && e.message ? e.message : e), 500);
   }
@@ -89,7 +93,6 @@ async function register({ env, body }) {
 // (в училище целият клас е зад един адрес) → 15 минути пауза.
 const FAILS = new Map();
 const WINDOW = 15 * 60e3;
-const ipOf = (request) => request.headers.get('cf-connecting-ip') || 'local';
 function tooMany(key, max) {
   const f = FAILS.get(key);
   if (!f) return false;
@@ -103,11 +106,14 @@ function addFail(key) {
   if (FAILS.size > 5000) FAILS.clear();
 }
 
-async function login({ env, body, request }) {
+async function login({ env, body, request, ctx }) {
   const ip = ipOf(request);
   const uname = String(body.username || '').trim().toLowerCase();
   const kIp = 'ip:' + ip, kUser = 'u:' + ip + ':' + uname;
-  if (tooMany(kIp, 200) || tooMany(kUser, 10)) return fail('Твърде много грешни опити. Опитай пак след 15 минути.', 429);
+  if (tooMany(kIp, 200) || tooMany(kUser, 10)) {
+    bump(ctx, env, { kind: 'login', ip, ua: uaOf(request), sample: uname.slice(0, 60) });
+    return fail('Твърде много грешни опити. Опитай пак след 15 минути.', 429);
+  }
   const bad = () => { addFail(kIp); addFail(kUser); return fail('Грешно потребителско име или парола.'); };
   const u = await env.DB.prepare('SELECT id, role, pass, salt, active FROM users WHERE username = ?').bind(String(body.username || '').trim()).first();
   // хешираме и при несъществуващо име, за да не личи по времето кои имена съществуват
@@ -115,6 +121,7 @@ async function login({ env, body, request }) {
   if (!u || !safeEqual(h, u.pass)) return bad();
   if (!u.active) return fail('Профилът ти е спрян. Попитай учителката.');
   const cookie = await createSession(env, u.id);
+  noteUserIp(ctx, env, u.id, ip, uaOf(request));
   return json({ ok: true, role: u.role }, 200, { 'set-cookie': cookie });
 }
 
@@ -339,6 +346,17 @@ async function teacherStudentCreate({ env, body }) {
   return json({ ok: true, name, username, password, class: cls });
 }
 
+async function teacherSecurity({ env }) {
+  const events = (await env.DB.prepare(`SELECT e.ip, e.kind, e.day, e.hits, e.first_at, e.last_at, e.ua, e.sample, e.user_id, u.name, u.class, u.username
+      FROM security_events e LEFT JOIN users u ON u.id = e.user_id
+      WHERE e.day >= date('now', '-30 days') ORDER BY e.last_at DESC LIMIT 90`).all()).results;
+  const ips = [...new Set(events.map((e) => e.ip))];
+  const seen = ips.length ? (await env.DB.prepare(`SELECT ui.ip, ui.ua, ui.first_at, ui.last_at, u.id, u.name, u.class, u.role
+      FROM user_ips ui JOIN users u ON u.id = ui.user_id
+      WHERE ui.ip IN (${ips.map(() => '?').join(',')}) ORDER BY ui.last_at DESC`).bind(...ips).all()).results : [];
+  return json({ events, seen });
+}
+
 async function teacherList({ env, user }) {
   const rows = (await env.DB.prepare("SELECT id, username, name, created_at, last_seen FROM users WHERE role = 'teacher' ORDER BY id").all()).results;
   return json({ rows: rows.map((r) => ({ ...r, me: r.id === user.id })) });
@@ -456,6 +474,7 @@ const ROUTES = {
   'POST t/class': [teacherClassCreate, 'teacher'],
   'POST t/student/create': [teacherStudentCreate, 'teacher'],
   'GET t/teachers': [teacherList, 'teacher'],
+  'GET t/security': [teacherSecurity, 'teacher'],
   'POST t/teacher/create': [teacherCreate, 'teacher'],
   'POST t/teacher/delete': [teacherDelete, 'teacher'],
   'POST t/class/toggle': [teacherClassToggle, 'teacher'],
